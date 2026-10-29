@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>少年野球 配車ヘルパー</title>
+<meta name="theme-color" content="#1e3a8a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="配車">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css?v=20261029c">
+</head>
+<body>
+
+<h1>⚾ 少年野球 配車ヘルパー</h1>
+
+<!-- リアルタイム状況バー -->
+<div class="status-bar" id="statusBar">
+  <div class="status-item">
+    <span class="status-label">参加選手</span>
+    <span class="status-val" id="countKids">0人</span>
+  </div>
+  <div class="status-item">
+    <span class="status-label">現地</span>
+    <span class="status-val" id="countOnSite">0人</span>
+  </div>
+  <div class="status-sep">/</div>
+  <div class="status-item">
+    <span class="status-label">乗車定員</span>
+    <span class="status-val" id="countSeats">0席</span>
+  </div>
+  <div class="status-sep">▶</div>
+  <div class="status-item">
+    <span class="status-label" id="statusDiffLabel">状況</span>
+    <span class="status-val" id="statusDiff">0席</span>
+  </div>
+</div>
+
+<!-- クイック操作バー -->
+<div class="control-bar">
+  <button type="button" class="control-btn control-btn-help" data-action="open-tutorial" title="使い方ガイドを開く">❓ 使い方</button>
+  <button type="button" class="control-btn control-btn-reset" data-action="reset-today" title="出欠・同乗・指定のみ初期化（マスタは保持）">🔄 本日の配車をリセット</button>
+  <button type="button" class="control-btn" data-action="manual-save">💾 今の状態を保存</button>
+</div>
+
+<!-- 本日の車 ＋ 選手一覧（スマホ1カラム / 768px〜2カラム） -->
+<div class="main-grid">
+
+  <section class="panel is-open" id="carsPanel" data-section="cars">
+    <button type="button" class="panel-toggle" data-action="toggle-section" data-section="cars" aria-expanded="true">
+      <div class="panel-toggle-main">
+        <span class="panel-title">本日の車</span>
+        <span class="panel-summary" id="carsSummary">出勤 —</span>
+      </div>
+      <span class="panel-chevron" aria-hidden="true"></span>
+    </button>
+    <div class="panel-body">
+      <div class="panel-toolbar">
+        <button type="button" class="btn-mini btn-sort-toggle" id="carSortToggleBtn" data-action="toggle-car-sort" aria-pressed="false" title="あいうえお順に切り替える">🔤 50音順</button>
+      </div>
+      <div id="carList"></div>
+      <div class="add-form">
+        <input type="text" id="newCarName" placeholder="車の名前/親の名前">
+        <input type="number" id="newCarCapacity" placeholder="定員" value="3">
+        <button type="button" class="btn-secondary" data-action="add-car">追加</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel is-open" id="childrenPanel" data-section="children">
+    <button type="button" class="panel-toggle" data-action="toggle-section" data-section="children" aria-expanded="true">
+      <div class="panel-toggle-main">
+        <span class="panel-title">参加選手</span>
+        <span class="panel-summary" id="childrenSummary">参加 —</span>
+      </div>
+      <span class="panel-chevron" aria-hidden="true"></span>
+    </button>
+    <div class="panel-body">
+      <div class="panel-toolbar">
+        <select class="select-sort-mode" id="childSortModeSelect" data-action="change-child-sort" aria-label="選手の並び順" title="選手の並び順">
+          <option value="default">並び順: 登録順</option>
+          <option value="grade">並び順: 学年順</option>
+          <option value="position">並び順: 守備位置順</option>
+          <option value="kana">並び順: 50音順</option>
+        </select>
+        <button type="button" class="btn-mini" data-action="promote">🎓 進級</button>
+      </div>
+      <div id="childList"></div>
+      <div class="add-form add-form-child">
+        <input type="text" id="newChildName" placeholder="名前">
+        <select id="newChildGrade">
+          <option value="6">6年</option>
+          <option value="5">5年</option>
+          <option value="4">4年</option>
+          <option value="3">3年</option>
+          <option value="2">2年</option>
+          <option value="1">1年</option>
+        </select>
+        <select id="newChildPos">
+          <option value="投手">投手</option>
+          <option value="捕手">捕手</option>
+          <option value="内野">内野</option>
+          <option value="外野">外野</option>
+          <option value="未定">未定</option>
+        </select>
+        <select id="newChildParentCar">
+          <option value="">親の車: なし</option>
+        </select>
+        <label class="inline-check-label">
+          <input type="checkbox" id="newChildMotionSick"> 🤢車酔
+        </label>
+        <button type="button" class="btn-secondary" data-action="add-child">追加</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- 配車設定・実行 -->
+<div class="card">
+  <h2 class="card-heading">配車ルール・条件</h2>
+  <div class="mode-select-box">
+    <label class="mode-label">割り振りの優先モード:</label>
+    <select id="carpoolMode">
+      <option value="balance">⚖ 標準（親の車固定 ＋ 過去履歴重視）</option>
+      <option value="grade_same">🎒 学年を固める（同学年同士を同乗）</option>
+      <option value="grade_diff">🔀 学年をバラバラに（高学年と低学年を分散）</option>
+      <option value="position">⚾ ポジション分散（投手・捕手などの偏り防止）</option>
+    </select>
+  </div>
+  <button type="button" class="btn btn-primary" data-action="generate">⚡ 配車を組む / 組み直す</button>
+</div>
+
+<!-- 配車失敗時の診断アドバイス -->
+<div class="diagnosis-card" id="carpoolDiagnosis" hidden></div>
+
+<!-- 結果表示 -->
+<div class="card result-card" id="resultCard">
+  <h2 class="card-heading">配車結果</h2>
+  <div id="resultWarnings" class="result-warnings" hidden></div>
+  <div class="result-box" id="resultText"></div>
+  <button type="button" class="btn btn-outline" data-action="generate">🔄 別の組み合わせで再計算する</button>
+  <button type="button" class="btn btn-success" data-action="copy-result">📋 配車表を共有（履歴を確定保存）</button>
+</div>
+
+<!-- 設定・バックアップ（折りたたみ・初期は閉じる） -->
+<section class="panel panel-settings" id="settingsPanel">
+  <button type="button" class="panel-toggle" data-action="toggle-settings" aria-expanded="false">
+    <div class="panel-toggle-main">
+      <span class="panel-title">設定・バックアップ</span>
+      <span class="panel-summary">LINE/メモ退避</span>
+    </div>
+    <span class="panel-chevron" aria-hidden="true"></span>
+  </button>
+  <div class="panel-body">
+    <p class="settings-hint">iOSでデータが消えたときや機種変更用に、全データをテキストで退避・復元できます。</p>
+    <label class="setting-item">
+      <span>出動回数の集計期間:</span>
+      <select id="dispatchPeriodSelect" data-action="set-dispatch-period">
+        <option value="30">直近1ヶ月 (30日)</option>
+        <option value="90" selected>直近3ヶ月 (90日)</option>
+        <option value="180">直近半年 (180日)</option>
+      </select>
+    </label>
+    <button type="button" class="btn btn-secondary btn-block" id="btnToggleRoleMaster" data-action="toggle-role-master" aria-expanded="false" aria-controls="roleMasterContainer">🏷️ 運転者・同乗者ラベルを編集 ▼</button>
+    <div id="roleMasterContainer" class="role-master" hidden>
+      <p class="role-master-label">運転者</p>
+      <div id="driverRoleTags" class="role-tag-list"></div>
+      <div class="role-master-add">
+        <input type="text" id="driverRoleInput" class="role-label-input" maxlength="20" placeholder="例: 添乗員" aria-label="運転者ラベルを追加">
+        <button type="button" class="btn btn-outline btn-compact" data-action="add-driver-role">追加</button>
+      </div>
+      <p class="role-master-label">同乗者</p>
+      <div id="companionRoleTags" class="role-tag-list"></div>
+      <div class="role-master-add">
+        <input type="text" id="companionRoleInput" class="role-label-input" maxlength="20" placeholder="例: 看護師" aria-label="同乗者ラベルを追加">
+        <button type="button" class="btn btn-outline btn-compact" data-action="add-companion-role">追加</button>
+      </div>
+      <button type="button" class="btn btn-secondary btn-compact" data-action="reset-role-labels">初期値に戻す</button>
+    </div>
+    <button type="button" class="btn btn-outline btn-compact" data-action="copy-backup">💾 データをLINE/メモへ退避（コピー）</button>
+    <button type="button" class="btn btn-restore btn-compact" data-action="open-restore">📥 退避テキストから復元</button>
+    <div class="reset-link reset-link-inline">
+      <button type="button" data-action="reset-data">データを完全に初期化（初期サンプルに戻す）</button>
+    </div>
+  </div>
+</section>
+
+<!-- 初回ガイド（オンボーディング） -->
+<div class="modal-overlay tutorial-overlay" id="tutorialModal" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+  <div class="modal-box tutorial-box">
+    <button type="button" class="tutorial-close" data-action="close-tutorial" aria-label="閉じる">✕</button>
+    <h3 id="tutorialTitle" class="tutorial-heading">使い方ガイド</h3>
+
+    <div class="tutorial-slides">
+      <div class="tutorial-slide is-active" data-slide="0">
+        <p class="tutorial-slide-title">毎回の基本の3ステップ</p>
+        <ul class="tutorial-list">
+          <li>🚗 <strong>1.</strong> 本日出す車を「出勤」にする</li>
+          <li>⚾ <strong>2.</strong> 休みの子を「欠席」、直行の子を「現地」にする</li>
+          <li>⚡ <strong>3.</strong> 「配車を組む」を押してLINEに貼り付けるだけ！</li>
+        </ul>
+      </div>
+      <div class="tutorial-slide" data-slide="1" hidden>
+        <p class="tutorial-slide-title">現場の便利機能</p>
+        <ul class="tutorial-list">
+          <li>💡 <strong>お母さんや兄弟が乗るとき:</strong> 車の「[母]」や選手の「＋同乗」をタップ（席数も自動計算）</li>
+          <li>📦 <strong>チーム荷物を積む車:</strong> 「道具車」にチェックを入れるとLINE見出しに反映</li>
+        </ul>
+      </div>
+      <div class="tutorial-slide" data-slide="2" hidden>
+        <p class="tutorial-slide-title">安心のデータ管理</p>
+        <ul class="tutorial-list">
+          <li>🔄 <strong>翌週の配車を始めるとき:</strong> 「本日の配車をリセット」で出欠だけ初期化（名簿は保護）</li>
+          <li>💾 <strong>月に1回</strong>「データをLINEへ退避」を押して、自分用のトークに貼っておくと安心！</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tutorial-dots" id="tutorialDots" aria-hidden="true">
+      <button type="button" class="tutorial-dot is-active" data-action="tutorial-goto" data-slide="0" aria-label="スライド1"></button>
+      <button type="button" class="tutorial-dot" data-action="tutorial-goto" data-slide="1" aria-label="スライド2"></button>
+      <button type="button" class="tutorial-dot" data-action="tutorial-goto" data-slide="2" aria-label="スライド3"></button>
+    </div>
+
+    <div class="tutorial-nav">
+      <button type="button" class="btn btn-secondary tutorial-btn" id="tutorialPrevBtn" data-action="tutorial-prev" disabled>前へ</button>
+      <button type="button" class="btn btn-primary tutorial-btn" id="tutorialNextBtn" data-action="tutorial-next">次へ</button>
+      <button type="button" class="btn btn-primary tutorial-btn" id="tutorialStartBtn" data-action="close-tutorial" hidden>配車をはじめる！</button>
+    </div>
+  </div>
+</div>
+
+<!-- バックアップ復元モーダル -->
+<div class="modal-overlay" id="restoreModal">
+  <div class="modal-box">
+    <h3>データの復元</h3>
+    <div class="modal-field">
+      <label for="restoreJson">退避テキストを貼り付け</label>
+      <textarea id="restoreJson" class="restore-input" placeholder="LINEやメモに保管したバックアップ用テキストをここに貼り付け"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" data-action="close-restore">キャンセル</button>
+      <button type="button" class="btn btn-primary" data-action="apply-restore">復元</button>
+    </div>
+  </div>
+</div>
+
+<!-- 選手情報 編集モーダル -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal-box">
+    <h3>選手情報の編集</h3>
+    <input type="hidden" id="editChildId">
+    <div class="modal-field">
+      <label>選手名</label>
+      <input type="text" id="editChildName">
+    </div>
+    <div class="modal-field">
+      <label>学年</label>
+      <select id="editChildGrade">
+        <option value="6">6年</option>
+        <option value="5">5年</option>
+        <option value="4">4年</option>
+        <option value="3">3年</option>
+        <option value="2">2年</option>
+        <option value="1">1年</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>ポジション</label>
+      <select id="editChildPos">
+        <option value="投手">投手</option>
+        <option value="捕手">捕手</option>
+        <option value="内野">内野</option>
+        <option value="外野">外野</option>
+        <option value="未定">未定</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>親の車</label>
+      <select id="editChildParentCar">
+        <option value="">なし</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>指定車両（固定）</label>
+      <select id="editChildFixedCar">
+        <option value="">自動（指定なし）</option>
+      </select>
+    </div>
+    <div class="modal-field modal-field-motion">
+      <label class="motion-edit-label">
+        <input type="checkbox" id="editChildMotionSick">
+        🤢 車酔いしやすい（助手席・前方優先）
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" data-action="close-modal">キャンセル</button>
+      <button type="button" class="btn btn-primary" data-action="save-child">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 依存順: data → ui → carpool → app（この順を崩さない） -->
+<script src="js/data.js?v=20261029c"></script>
+<script src="js/ui.js?v=20261029c"></script>
+<script src="js/carpool.js?v=20261029c"></script>
+<script src="js/app.js?v=20261029c"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.error('SW registration failed:', err));
+  });
+}
+</script>
+</body>
+</html>
