@@ -15,6 +15,7 @@ const CLICK_ACTIONS = new Set([
   'copy-result',
   'print-plan',
   'reset-data',
+  'reset-vehicles',
   'copy-backup',
   'open-restore',
   'close-restore',
@@ -124,6 +125,9 @@ function runClickAction(target) {
       break;
     case 'reset-data':
       resetAllData();
+      break;
+    case 'reset-vehicles':
+      resetVehiclesToDefaultView();
       break;
     case 'copy-backup':
       copyBackupData();

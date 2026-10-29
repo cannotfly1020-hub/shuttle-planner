@@ -1,9 +1,47 @@
 (function (global) {
+const STANDARD_OPERATING_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
 function createDefaultCars() {
   return [
-    { id: 1, name: '1号車', capacity: 4, active: true, companions: [], isEquipmentCar: false },
-    { id: 2, name: '2号車', capacity: 4, active: true, companions: [], isEquipmentCar: false },
-    { id: 3, name: 'リフト車', capacity: 2, active: true, companions: [], isEquipmentCar: true }
+    {
+      id: 1,
+      name: '1号車',
+      capacity: 4,
+      active: true,
+      companions: [],
+      isEquipmentCar: false,
+      isSpecialVehicle: false,
+      driverRole: 'role_driver',
+      assistantRole: '',
+      operatingDays: STANDARD_OPERATING_DAYS.slice(),
+      features: ['一般車']
+    },
+    {
+      id: 2,
+      name: '2号車',
+      capacity: 4,
+      active: true,
+      companions: [],
+      isEquipmentCar: false,
+      isSpecialVehicle: false,
+      driverRole: 'role_driver',
+      assistantRole: '',
+      operatingDays: STANDARD_OPERATING_DAYS.slice(),
+      features: ['一般車']
+    },
+    {
+      id: 3,
+      name: 'リフト車',
+      capacity: 3,
+      active: true,
+      companions: [],
+      isEquipmentCar: true,
+      isSpecialVehicle: true,
+      driverRole: 'role_driver',
+      assistantRole: 'role_instructor',
+      operatingDays: STANDARD_OPERATING_DAYS.slice(),
+      features: ['リフト', '大型車']
+    }
   ];
 }
 
@@ -464,6 +502,12 @@ function defaultDriverName() {
   return '運転手（職員）';
 }
 
+function normalizeAssistantRole(value) {
+  const role = typeof value === 'string' ? value.trim() : '';
+  if (!role || role === 'none') return '';
+  return role.slice(0, ROLE_LABEL_MAX);
+}
+
 function normalizeDriverRole(value) {
   const role = typeof value === 'string' ? value.trim() : '';
   if (!role || LEGACY_FAMILY_ROLES.has(role)) return defaultDriverName();
@@ -516,7 +560,7 @@ function normalizeCar(car) {
     isSpecialVehicle: special,
     features: normalizeVehicleFeatures(Object.assign({}, car, { isEquipmentCar: special, isSpecialVehicle: special })),
     driverRole: normalizeDriverRole(car.driverRole != null ? car.driverRole : car.driver),
-    assistantRole: typeof car.assistantRole === 'string' ? car.assistantRole.trim().slice(0, ROLE_LABEL_MAX) : '',
+    assistantRole: normalizeAssistantRole(car.assistantRole),
     operatingDays: parsedDays == null ? ALL_DAY_KEYS.slice() : parsedDays,
     dispatchHistory: normalizeDispatchHistory(car.dispatchHistory)
   };
@@ -1080,6 +1124,115 @@ function renameCar(carId, newName) {
 let cars = [];
 let children = [];
 
+/** 少年野球時代の車両名。名前に含まれていれば標準名へ寄せる。 */
+function legacyVehicleTarget(name) {
+  const text = typeof name === 'string' ? name.trim() : '';
+  if (!text) return null;
+  if (text.indexOf('田中号') !== -1) return { name: 'リフト車', special: true };
+  if (text.indexOf('佐藤号') !== -1) return { name: '1号車', special: false };
+  if (text.indexOf('鈴木号') !== -1) return { name: '2号車', special: false };
+  return null;
+}
+
+function remapStoredVehicleName(name) {
+  if (typeof name !== 'string' || !name) return name;
+  const target = legacyVehicleTarget(name);
+  return target ? target.name : name;
+}
+
+function rewriteLegacyVehicleText(text) {
+  return String(text || '')
+    .split('田中号(荷物車)').join('リフト車')
+    .split('田中号（荷物車）').join('リフト車')
+    .split('田中号').join('リフト車')
+    .split('佐藤号').join('1号車')
+    .split('鈴木号').join('2号車');
+}
+
+function remapChildVehicleNames(child) {
+  if (!child || typeof child !== 'object') return false;
+  let changed = false;
+  ['parentCar', 'fixedVehicle', 'fixedCar', 'lastCar'].forEach((key) => {
+    if (typeof child[key] !== 'string' || !child[key]) return;
+    const next = remapStoredVehicleName(child[key]);
+    if (next !== child[key]) {
+      child[key] = next;
+      changed = true;
+    }
+  });
+  if (child.parentCar && !child.fixedVehicle) {
+    child.fixedVehicle = child.parentCar;
+    changed = true;
+  }
+  if (child.fixedVehicle && !child.parentCar) {
+    child.parentCar = child.fixedVehicle;
+    changed = true;
+  }
+  if (child.rideHistory && typeof child.rideHistory === 'object' && !Array.isArray(child.rideHistory)) {
+    const next = {};
+    let historyChanged = false;
+    Object.keys(child.rideHistory).forEach((key) => {
+      const mapped = remapStoredVehicleName(key);
+      if (mapped !== key) historyChanged = true;
+      next[mapped] = (next[mapped] || 0) + (Number(child.rideHistory[key]) || 0);
+    });
+    if (historyChanged) {
+      child.rideHistory = next;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function migrateLegacyVehicles() {
+  let changed = false;
+  cars.forEach((car) => {
+    const target = legacyVehicleTarget(car.name);
+    if (!target) return;
+    if (car.name !== target.name) {
+      const taken = cars.some((other) => other !== car && other.name === target.name);
+      if (!taken) {
+        car.name = target.name;
+        changed = true;
+      }
+    }
+    if (target.special) {
+      if (!car.isSpecialVehicle || !car.isEquipmentCar) {
+        car.isSpecialVehicle = true;
+        car.isEquipmentCar = true;
+        changed = true;
+      }
+      if (!Array.isArray(car.features) || car.features.length !== 1 || car.features[0] !== 'リフト') {
+        car.features = ['リフト'];
+        changed = true;
+      }
+    }
+  });
+  children.forEach((child) => {
+    if (remapChildVehicleNames(child)) changed = true;
+  });
+  return changed;
+}
+
+function readStoredVehicleList() {
+  const keys = ['cp_cars', 'shuttle_vehicles_v1'];
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const raw = localStorage.getItem(keys[i]);
+      if (raw == null || raw === '') continue;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) { /* 次のキーを見る */ }
+  }
+  return null;
+}
+
+function getVehicles() {
+  const stored = readStoredVehicleList();
+  const source = Array.isArray(stored) ? stored : createDefaultCars();
+  return source.map(normalizeCar);
+}
+
 function loadData() {
   try {
     loadRoleMaster();
@@ -1088,8 +1241,7 @@ function loadData() {
   }
 
   try {
-    const loadedCars = JSON.parse(localStorage.getItem('cp_cars')) || createDefaultCars();
-    cars = loadedCars.map(normalizeCar);
+    cars = getVehicles();
   } catch (e) {
     cars = createDefaultCars().map(normalizeCar);
   }
@@ -1114,11 +1266,8 @@ function loadData() {
       changed = true;
     }
   });
-  if (changed) {
-    try {
-      localStorage.setItem('cp_children', JSON.stringify(children));
-    } catch (e) { /* ignore */ }
-  }
+  if (migrateLegacyVehicles()) changed = true;
+  if (changed) saveData();
 
   try {
     loadCareTagMaster();
@@ -1156,6 +1305,22 @@ function saveData() {
   } catch (e) {
     console.error("保存エラー:", e);
   }
+}
+
+/** 車両マスタだけを 1号車・2号車・リフト車へ戻す。利用者名簿は残す。 */
+function resetVehiclesToDefault() {
+  cars = createDefaultCars().map(normalizeCar);
+  const valid = new Set(cars.map((car) => car.name));
+  children.forEach((child) => {
+    remapChildVehicleNames(child);
+    ['parentCar', 'fixedVehicle', 'fixedCar'].forEach((key) => {
+      if (typeof child[key] === 'string' && child[key] && !valid.has(child[key])) child[key] = '';
+    });
+    if (child.parentCar && !child.fixedVehicle) child.fixedVehicle = child.parentCar;
+    if (child.fixedVehicle && !child.parentCar) child.parentCar = child.fixedVehicle;
+  });
+  saveData();
+  return cars;
 }
 
 const TUTORIAL_SEEN_KEY = 'cp_tutorial_seen';
@@ -1468,6 +1633,9 @@ function promoteAllGrades() {
     markTutorialSeen,
     renameCar,
     renameCarCascade,
+    getVehicles,
+    resetVehiclesToDefault,
+    rewriteLegacyVehicleText,
     resetTodaySession,
     clearAllChecks,
     resetAllData,
@@ -1547,6 +1715,9 @@ function promoteAllGrades() {
   global.markTutorialSeen = markTutorialSeen;
   global.renameCar = renameCar;
   global.renameCarCascade = renameCarCascade;
+  global.getVehicles = getVehicles;
+  global.resetVehiclesToDefault = resetVehiclesToDefault;
+  global.rewriteLegacyVehicleText = rewriteLegacyVehicleText;
   global.resetTodaySession = resetTodaySession;
   global.clearAllChecks = clearAllChecks;
   global.resetAllData = resetAllData;

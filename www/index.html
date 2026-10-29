@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="スマート送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029r">
+<link rel="stylesheet" href="css/style.css?v=20261029s">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -293,6 +293,7 @@
       </div>
       <button type="button" class="btn btn-secondary btn-compact" data-action="reset-role-labels">初期値に戻す</button>
     </div>
+    <button type="button" class="btn btn-outline btn-block" data-action="reset-vehicles">車両設定を初期状態（1号車・2号車・リフト車）に戻す</button>
     <button type="button" class="btn btn-outline btn-compact" data-action="copy-backup">💾 データをLINE/メモへ退避（コピー）</button>
     <button type="button" class="btn btn-restore btn-compact" data-action="open-restore">📥 退避テキストから復元</button>
     <div class="reset-link reset-link-inline">
@@ -437,11 +438,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029r"></script>
-<script src="js/ui.js?v=20261029r"></script>
-<script src="js/carpool.js?v=20261029r"></script>
-<script src="js/route.js?v=20261029r"></script>
-<script src="js/app.js?v=20261029r"></script>
+<script src="js/data.js?v=20261029s"></script>
+<script src="js/ui.js?v=20261029s"></script>
+<script src="js/carpool.js?v=20261029s"></script>
+<script src="js/route.js?v=20261029s"></script>
+<script src="js/app.js?v=20261029s"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

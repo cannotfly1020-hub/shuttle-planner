@@ -883,7 +883,7 @@ function escapeRoleText(value) {
 
 /**
  * 配車見出しの括弧。運転者を先頭にし、同じ名前の同乗者は重ねない。
- * 運転者が空で同乗者もいなければ空文字（「佐藤号」のまま）。
+ * 運転者が空で同乗者もいなければ空文字（車両名のまま）。
  */
 function formatCarCompanionHeader(car) {
   const role = vehicleDriverLabel(car);
@@ -1531,6 +1531,18 @@ function refreshLists() {
   renderCars();
   renderChildren();
   updateStatusBar();
+}
+
+function resetVehiclesToDefaultView() {
+  if (typeof resetVehiclesToDefault !== 'function') return;
+  resetVehiclesToDefault();
+  if (typeof rewriteLegacyVehicleText === 'function') {
+    if (typeof routePlanBase === 'string' && routePlanBase) routePlanBase = rewriteLegacyVehicleText(routePlanBase);
+    if (typeof lastGeneratedPlan === 'string' && lastGeneratedPlan) lastGeneratedPlan = rewriteLegacyVehicleText(lastGeneratedPlan);
+    const box = document.getElementById('resultText');
+    if (box && box.textContent) box.textContent = rewriteLegacyVehicleText(box.textContent);
+  }
+  refreshLists();
 }
 
 function toggleCar(id, checked) {
@@ -2997,6 +3009,7 @@ window.addEventListener('beforeprint', syncPrintHeader);
     renderCars,
     renderChildren,
     refreshLists,
+    resetVehiclesToDefaultView,
     updateStatusBar,
     openCompanionEditor: openChildCompanionEditor,
     openChildCompanionEditor,
