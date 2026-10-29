@@ -206,14 +206,60 @@ function applySpecialVehicle(vehicle, checked) {
   const next = !!checked;
   vehicle.isSpecialVehicle = next;
   vehicle.isEquipmentCar = next;
+  const features = Array.isArray(vehicle.features)
+    ? vehicle.features.map((feature) => textOrEmpty(feature)).filter((feature) => feature && feature !== 'リフト')
+    : [];
+  if (next) features.push('リフト');
+  vehicle.features = features;
 }
 
-/** 運転者。driverRole を優先し、旧 driver と家族呼称にフォールバック */
+function findStaffRole(value) {
+  const key = textOrEmpty(value);
+  if (!key || typeof getRoles !== 'function') return null;
+  try {
+    return getRoles().find((role) => role && (role.id === key || role.name === key)) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function findCareTagMeta(value) {
+  const key = textOrEmpty(value);
+  if (!key || typeof getCareTags !== 'function') return null;
+  try {
+    return getCareTags().find((tag) => tag && (tag.id === key || tag.name === key)) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function contrastTextColor(hex) {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(textOrEmpty(hex));
+  if (!match) return '#ffffff';
+  const n = parseInt(match[1], 16);
+  const y = (((n >> 16) & 255) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000;
+  return y > 160 ? '#1e293b' : '#ffffff';
+}
+
+/** 運転者。ロールIDを名称へ解決し、旧 driver と家族呼称にフォールバック */
 function vehicleDriverLabel(vehicle) {
   if (!vehicle || typeof vehicle !== 'object') return '';
-  const role = textOrEmpty(vehicle.driverRole) || textOrEmpty(vehicle.driver);
-  if (role === '父' || role === '母' || role === '祖父' || role === '祖母' || role === 'コーチ') return 'ドライバー';
-  return role;
+  const raw = textOrEmpty(vehicle.driverRole) || textOrEmpty(vehicle.driver);
+  const role = findStaffRole(raw);
+  if (role) return role.name;
+  if (!raw || raw === '父' || raw === '母' || raw === '祖父' || raw === '祖母' || raw === 'コーチ' || raw === 'ドライバー') {
+    const drivers = typeof getRoles === 'function' ? getRoles().filter((item) => item.isDriver) : [];
+    return drivers.length ? drivers[0].name : '運転手（職員）';
+  }
+  return raw;
+}
+
+function vehicleAssistantLabel(vehicle) {
+  if (!vehicle || typeof vehicle !== 'object') return '';
+  const raw = textOrEmpty(vehicle.assistantRole);
+  if (!raw) return '';
+  const role = findStaffRole(raw);
+  return role ? role.name : raw;
 }
 
 function fixedVehicleAutoLabel(passenger) {
@@ -225,7 +271,11 @@ function fixedVehicleAutoLabel(passenger) {
 function buildCareTagBadgesHtml(passenger) {
   return passengerCareTags(passenger).map((tag) => {
     const safe = escapeRoleText(tag);
-    return `<span class="badge ${careTagBadgeClass(tag)} badge-care" title="要配慮">${safe}</span>`;
+    const meta = findCareTagMeta(tag);
+    if (!meta) return `<span class="badge ${careTagBadgeClass(tag)} badge-care" title="要配慮">${safe}</span>`;
+    const bg = escapeRoleText(meta.color || '#d97706');
+    const fg = escapeRoleText(meta.textColor || contrastTextColor(meta.color));
+    return `<span class="badge badge-care" title="要配慮" style="background:${bg};color:${fg};border-color:${bg}">${safe}</span>`;
   }).join('');
 }
 
@@ -596,11 +646,148 @@ function updatePanelSummaries(activeCarsList, activeSeats, seatDemand, activeKid
   }
 }
 
+const SERVICE_DATE_KEY = 'shuttle_service_date_v1';
+let selectedServiceDate = localDateString();
+try {
+  const storedDate = sessionStorage.getItem(SERVICE_DATE_KEY);
+  const parsedDate = storedDate ? normalizeDispatchDate(storedDate) : null;
+  if (parsedDate) selectedServiceDate = parsedDate;
+} catch (e) { /* 日付の復元に失敗しても本日で開く */ }
+
+function getSelectedServiceDate() {
+  return selectedServiceDate || localDateString();
+}
+
+function formatServiceDateCaption(dateStr) {
+  const ymd = normalizeDispatchDate(dateStr) || localDateString();
+  const parts = ymd.split('-');
+  const labels = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土', sun: '日' };
+  const prefix = ymd === localDateString() ? '本日: ' : '';
+  return `${prefix}${Number(parts[1])}/${Number(parts[2])}(${labels[getDayOfWeekKey(ymd)] || ''})`;
+}
+
+function syncServiceDateBar() {
+  const ymd = getSelectedServiceDate();
+  const caption = document.getElementById('serviceDateCaption');
+  const input = document.getElementById('serviceDateInput');
+  if (caption) caption.textContent = formatServiceDateCaption(ymd);
+  if (input && input.value !== ymd) input.value = ymd;
+  const day = getDayOfWeekKey(ymd);
+  document.querySelectorAll('#serviceDateBar .weekday-btn').forEach((btn) => {
+    const on = btn.dataset.day === day;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function setServiceDate(dateStr) {
+  const next = normalizeDispatchDate(dateStr) || localDateString();
+  selectedServiceDate = next;
+  try { sessionStorage.setItem(SERVICE_DATE_KEY, next); } catch (e) { /* セッション保持は任意 */ }
+  syncServiceDateBar();
+  refreshLists();
+}
+
+function setServiceWeekday(dayKey) {
+  setServiceDate(dateForWeekday(getSelectedServiceDate(), dayKey));
+}
+
+function scheduleRoot(scope) {
+  return document.getElementById(scope === 'edit' ? 'editChildWeekdays' : 'newChildWeekdays');
+}
+
+function selectedScheduleDays(scope) {
+  const root = scheduleRoot(scope);
+  if (!root) return WEEKDAY_KEYS.slice();
+  const days = [];
+  root.querySelectorAll('[data-day]').forEach((btn) => {
+    if (btn.getAttribute('aria-pressed') === 'true' && btn.dataset.day) days.push(btn.dataset.day);
+  });
+  return days;
+}
+
+function renderSchedulePills(scope, pattern) {
+  const root = scheduleRoot(scope);
+  if (!root) return;
+  const selected = new Set(Array.isArray(pattern) ? pattern : WEEKDAY_KEYS);
+  root.querySelectorAll('[data-day]').forEach((btn) => {
+    const on = selected.has(btn.dataset.day);
+    btn.classList.toggle('is-selected', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function toggleScheduleDay(scope, day) {
+  const root = scheduleRoot(scope);
+  if (!root || !day) return;
+  const btn = root.querySelector(`[data-day="${day}"]`);
+  if (!btn) return;
+  const on = btn.getAttribute('aria-pressed') !== 'true';
+  btn.classList.toggle('is-selected', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function passengerDayStatus(passenger, dateStr) {
+  if (!passenger) return 'off';
+  if (passenger.isActive === false) return 'paused';
+  const date = dateStr || getSelectedServiceDate();
+  const day = getDayOfWeekKey(date);
+  const override = getDailyOverride(date);
+  const id = String(passenger.id);
+  if (override.absentPassengerIds.map(String).includes(id)) return 'absent';
+  if (Array.isArray(passenger.schedulePattern) && passenger.schedulePattern.includes(day)) return 'scheduled';
+  if (override.spotPassengerIds.map(String).includes(id)) return 'spot';
+  return 'off';
+}
+
+function dayStatusView(status) {
+  if (status === 'scheduled') return { label: '利用予定', className: 'is-scheduled' };
+  if (status === 'absent') return { label: '欠席', className: 'is-absent' };
+  if (status === 'spot') return { label: '当日スポット', className: 'is-spot' };
+  if (status === 'paused') return { label: '休会', className: 'is-paused' };
+  return { label: 'お休み', className: 'is-off' };
+}
+
+function togglePassengerDayStatus(id) {
+  const passenger = children.find((item) => String(item.id) === String(id));
+  if (!passenger || passenger.isActive === false) return;
+  const date = getSelectedServiceDate();
+  const status = passengerDayStatus(passenger, date);
+  const override = getDailyOverride(date);
+  const sid = String(passenger.id);
+  const absent = override.absentPassengerIds.map(String).filter((item) => item !== sid);
+  const spot = override.spotPassengerIds.map(String).filter((item) => item !== sid);
+  if (status === 'scheduled') absent.push(sid);
+  else if (status === 'off') spot.push(sid);
+  saveDailyOverride(date, {
+    date: date,
+    absentPassengerIds: absent,
+    spotPassengerIds: spot,
+    outOfServiceVehicleIds: override.outOfServiceVehicleIds
+  });
+  refreshLists();
+}
+
+function vehicleOperatesOnSelectedDay(car) {
+  if (!car) return false;
+  const days = car.operatingDays;
+  if (!Array.isArray(days)) return true;
+  return days.includes(getDayOfWeekKey(getSelectedServiceDate()));
+}
+
+function vehicleInServiceOnSelectedDay(car) {
+  if (!car || car.active === false || !vehicleOperatesOnSelectedDay(car)) return false;
+  const override = getDailyOverride(getSelectedServiceDate());
+  return !override.outOfServiceVehicleIds.map(String).includes(String(car.id));
+}
+
 function updateStatusBar() {
-  const activeKids = children.filter(isParticipating).length;
-  const onSiteKids = children.filter(isOnSite).length;
-  const activeCarsList = cars.filter(c => c.active);
-  const kidSeats = children.reduce((sum, c) => sum + seatCost(c), 0);
+  const picked = getActiveEntitiesForDate(getSelectedServiceDate());
+  const todayPassengers = picked.activePassengers;
+  const activeKids = todayPassengers.filter(isParticipating).length;
+  const onSiteKids = todayPassengers.filter(isOnSite).length;
+  const activeCarsList = picked.activeVehicles;
+  const kidSeats = todayPassengers.reduce((sum, c) => sum + seatCost(c), 0);
   const companionDemand = activeCarsList.reduce((sum, c) => sum + companionSeatsOf(c), 0);
   const seatDemand = kidSeats + companionDemand;
   const activeSeats = activeCarsList.reduce((sum, c) => sum + (parseInt(c.capacity, 10) || 0), 0);
@@ -698,34 +885,62 @@ function escapeRoleText(value) {
  */
 function formatCarCompanionHeader(car) {
   const role = vehicleDriverLabel(car);
+  const assistant = vehicleAssistantLabel(car);
   const companions = companionsOf(car)
     .map((item) => (item && item.label ? String(item.label).trim() : ''))
-    .filter((label) => label && label !== role);
-  const parts = role ? [role, ...companions] : companions;
+    .filter((label) => label && label !== role && label !== assistant);
+  const parts = [];
+  if (role) parts.push(role);
+  if (assistant) parts.push(assistant);
+  companions.forEach((label) => parts.push(label));
   if (!parts.length) return '';
   return `（${parts.join('、')}）`;
 }
 
-function buildDriverSelectHtml(car) {
-  const roles = getDriverRoles();
-  const current = vehicleDriverLabel(car);
-  const options = roles.slice();
-  if (current && options.indexOf(current) === -1) options.unshift(current);
-  if (!options.length) options.push(current || 'ドライバー');
-  const selected = options.indexOf(current) !== -1 ? current : options[0];
-  const html = options.map((role) => {
-    const safe = escapeRoleText(role);
-    return `<option value="${safe}" ${selected === role ? 'selected' : ''}>${safe}</option>`;
+function buildRoleOptionsHtml(roles, selectedId) {
+  return roles.map((role) => {
+    const id = escapeRoleText(role.id);
+    const name = escapeRoleText(role.name);
+    return `<option value="${id}" ${selectedId === role.id ? 'selected' : ''}>${name}</option>`;
   }).join('');
-  return `<label class="driver-select-label"><span>ドライバー:</span><select class="car-driver-select" data-action="set-car-driver" data-id="${car.id}" data-car-id="${car.id}" aria-label="本日のドライバー">${html}</select></label>`;
+}
+
+function buildDriverSelectHtml(car) {
+  const roles = (typeof getRoles === 'function' ? getRoles() : []).filter((role) => role.isDriver);
+  const current = findStaffRole(textOrEmpty(car.driverRole) || textOrEmpty(car.driver));
+  const options = roles.slice();
+  if (current && !options.some((role) => role.id === current.id)) options.unshift(current);
+  if (!options.length) options.push({ id: 'role_driver', name: vehicleDriverLabel(car) || '運転手（職員）' });
+  const selectedId = current && options.some((role) => role.id === current.id) ? current.id : options[0].id;
+  return `<label class="driver-select-label"><span>運転者:</span><select class="car-driver-select" data-action="set-car-driver" data-id="${car.id}" data-car-id="${car.id}" aria-label="本日の運転者">${buildRoleOptionsHtml(options, selectedId)}</select></label>`;
+}
+
+function buildAssistantSelectHtml(car) {
+  const roles = (typeof getRoles === 'function' ? getRoles() : []).filter((role) => role.isAssistant);
+  const current = findStaffRole(car.assistantRole);
+  const options = roles.slice();
+  if (current && current.isAssistant === false && !options.some((role) => role.id === current.id)) options.unshift(current);
+  else if (current && !options.some((role) => role.id === current.id)) options.unshift(current);
+  const selectedId = current ? current.id : '';
+  const html = `<option value="">なし</option>${buildRoleOptionsHtml(options, selectedId)}`;
+  return `<label class="driver-select-label"><span>添乗員:</span><select class="car-driver-select car-assistant-select" data-action="set-car-assistant" data-id="${car.id}" data-car-id="${car.id}" aria-label="本日の添乗員（任意）">${html}</select></label>`;
 }
 
 function setCarDriverRole(id, role) {
   const car = cars.find((item) => String(item.id) === String(id));
   if (!car) return;
-  const next = typeof role === 'string' ? role.trim().slice(0, 20) : '';
+  const next = typeof role === 'string' ? role.trim().slice(0, 48) : '';
   if (!next || car.driverRole === next) return;
   car.driverRole = next;
+  saveData();
+}
+
+function setCarAssistantRole(id, role) {
+  const car = cars.find((item) => String(item.id) === String(id));
+  if (!car) return;
+  const next = typeof role === 'string' ? role.trim().slice(0, 48) : '';
+  if ((car.assistantRole || '') === next) return;
+  car.assistantRole = next;
   saveData();
 }
 
@@ -736,22 +951,95 @@ function buildQuickRoleButtonsHtml(labels, action, ownerId, disabled) {
   }).join('');
 }
 
-function renderRoleTagList(elementId, labels, action) {
-  const el = document.getElementById(elementId);
+let masterTab = 'roles';
+
+function safeMasterList(getter) {
+  if (typeof getter !== 'function') return [];
+  try {
+    const list = getter();
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function renderStaffRoleEditor() {
+  const el = document.getElementById('roleMasterList');
   if (!el) return;
-  if (!labels.length) {
-    el.innerHTML = '<span class="role-tag-empty">ラベルがありません</span>';
+  const roles = safeMasterList(typeof getRoles === 'function' ? getRoles : null);
+  if (!roles.length) {
+    el.innerHTML = '<span class="role-tag-empty">ロールがありません</span>';
     return;
   }
-  el.innerHTML = labels.map((label) => {
-    const safe = escapeRoleText(label);
-    return `<span class="role-tag">${safe}<button type="button" class="role-tag-delete" data-action="${action}" data-label="${safe}" aria-label="${safe}を削除">×</button></span>`;
+  el.innerHTML = roles.map((role) => {
+    const id = escapeRoleText(role.id);
+    const name = escapeRoleText(role.name);
+    const color = escapeRoleText(role.badgeColor || '#2563eb');
+    const fg = escapeRoleText(contrastTextColor(role.badgeColor));
+    return `<div class="master-row">
+      <input type="color" class="master-color" data-action="edit-role-color" data-role-id="${id}" value="${color}" aria-label="${name}の色">
+      <input type="text" class="master-name" data-action="rename-role" data-role-id="${id}" value="${name}" maxlength="40" aria-label="ロール名">
+      <label class="master-flag"><input type="checkbox" data-action="toggle-role-driver" data-role-id="${id}" ${role.isDriver ? 'checked' : ''}> 運転</label>
+      <label class="master-flag"><input type="checkbox" data-action="toggle-role-assistant" data-role-id="${id}" ${role.isAssistant ? 'checked' : ''}> 添乗</label>
+      <span class="master-badge" style="background:${color};color:${fg}">${name}</span>
+      <button type="button" class="role-tag-delete" data-action="delete-role" data-role-id="${id}" aria-label="${name}を削除">×</button>
+    </div>`;
   }).join('');
 }
 
+function renderCareTagEditor() {
+  const el = document.getElementById('careTagMasterList');
+  if (!el) return;
+  const tags = safeMasterList(typeof getCareTags === 'function' ? getCareTags : null);
+  if (!tags.length) {
+    el.innerHTML = '<span class="role-tag-empty">要配慮タグがありません</span>';
+    return;
+  }
+  el.innerHTML = tags.map((tag) => {
+    const id = escapeRoleText(tag.id);
+    const name = escapeRoleText(tag.name);
+    const color = escapeRoleText(tag.color || '#d97706');
+    const fg = escapeRoleText(tag.textColor || contrastTextColor(tag.color));
+    return `<div class="master-row">
+      <input type="color" class="master-color" data-action="edit-care-tag-color" data-tag-id="${id}" value="${color}" aria-label="${name}の色">
+      <input type="text" class="master-name" data-action="rename-care-tag" data-tag-id="${id}" value="${name}" maxlength="40" aria-label="タグ名">
+      <label class="master-flag"><input type="checkbox" data-action="toggle-care-tag-disperse" data-tag-id="${id}" ${tag.preventCoOccurrence ? 'checked' : ''}> 分散</label>
+      <span class="master-badge" style="background:${color};color:${fg}">${name}</span>
+      <button type="button" class="role-tag-delete" data-action="delete-care-tag" data-tag-id="${id}" aria-label="${name}を削除">×</button>
+    </div>`;
+  }).join('');
+}
+
+function syncMasterTab() {
+  const showRoles = masterTab !== 'tags';
+  const rolesPanel = document.getElementById('roleMasterPanel');
+  const tagsPanel = document.getElementById('careTagMasterPanel');
+  const rolesTab = document.getElementById('masterTabRoles');
+  const tagsTab = document.getElementById('masterTabTags');
+  if (rolesPanel) rolesPanel.hidden = !showRoles;
+  if (tagsPanel) tagsPanel.hidden = showRoles;
+  if (rolesTab) {
+    rolesTab.classList.toggle('is-active', showRoles);
+    rolesTab.setAttribute('aria-selected', showRoles ? 'true' : 'false');
+  }
+  if (tagsTab) {
+    tagsTab.classList.toggle('is-active', !showRoles);
+    tagsTab.setAttribute('aria-selected', showRoles ? 'false' : 'true');
+  }
+}
+
 function renderRoleMaster() {
-  renderRoleTagList('driverRoleTags', getDriverRoles(), 'remove-driver-role');
-  renderRoleTagList('companionRoleTags', getCompanionRoles(), 'remove-companion-role');
+  renderStaffRoleEditor();
+  renderCareTagEditor();
+  renderCarePills('new');
+  const editModal = document.getElementById('editModal');
+  if (editModal && editModal.classList.contains('is-open')) renderCarePills('edit');
+  syncMasterTab();
+}
+
+function switchMasterTab(tab) {
+  masterTab = tab === 'tags' ? 'tags' : 'roles';
+  syncMasterTab();
 }
 
 function toggleRoleMaster() {
@@ -762,61 +1050,286 @@ function toggleRoleMaster() {
   box.hidden = !willOpen;
   btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   btn.textContent = willOpen
-    ? '🏷️ ドライバー・同乗者ラベルを編集 ▲'
-    : '🏷️ ドライバー・同乗者ラベルを編集 ▼';
+    ? '🏷️ スタッフ・ロール / 要配慮タグを編集 ▲'
+    : '🏷️ スタッフ・ロール / 要配慮タグを編集 ▼';
+  if (willOpen) renderRoleMaster();
 }
 
-function addRoleLabel(inputId, getter, saver, emptyMessage) {
-  const input = document.getElementById(inputId);
-  const name = input ? input.value.trim() : '';
+function refreshAfterMasterChange() {
+  renderCars();
+  renderChildren();
+}
+
+function addRoleFromInput() {
+  const nameInput = document.getElementById('newRoleName');
+  const colorInput = document.getElementById('newRoleColor');
+  const driverInput = document.getElementById('newRoleDriver');
+  const assistantInput = document.getElementById('newRoleAssistant');
+  const name = nameInput ? nameInput.value.trim() : '';
   if (!name) {
-    alert(emptyMessage);
+    alert('ロール名を入力してください。');
     return;
   }
-  const list = getter();
-  if (list.indexOf(name) !== -1) {
+  const roles = safeMasterList(getRoles);
+  if (roles.some((role) => role.name === name)) {
     alert('すでに登録されています。');
     return;
   }
-  list.push(name);
-  saver(list);
-  if (input) input.value = '';
-  renderCars();
-  renderChildren();
+  const isAssistant = !!(assistantInput && assistantInput.checked);
+  const isDriver = driverInput ? !!driverInput.checked : !isAssistant;
+  const color = colorInput && colorInput.value ? colorInput.value : '#2563eb';
+  roles.push({
+    id: `role_custom_${Date.now()}`,
+    name: name,
+    isDriver: isDriver || !isAssistant,
+    isAssistant: isAssistant,
+    badgeColor: color
+  });
+  saveRoles(roles);
+  if (nameInput) nameInput.value = '';
+  refreshAfterMasterChange();
+}
+
+function updateRoleById(roleId, mutate) {
+  const roles = safeMasterList(getRoles);
+  const role = roles.find((item) => item.id === roleId);
+  if (!role) return;
+  const prevName = role.name;
+  mutate(role);
+  role.name = textOrEmpty(role.name).slice(0, 40);
+  if (!role.name) {
+    alert('ロール名を入力してください。');
+    renderRoleMaster();
+    return;
+  }
+  if (roles.some((item) => item !== role && item.name === role.name)) {
+    alert('すでに登録されています。');
+    renderRoleMaster();
+    return;
+  }
+  if (!role.isDriver && !role.isAssistant) role.isAssistant = true;
+  saveRoles(roles);
+  if (prevName !== role.name) {
+    cars.forEach((car) => {
+      if (car.driverRole === prevName) car.driverRole = role.id;
+      if (car.assistantRole === prevName) car.assistantRole = role.id;
+    });
+    saveData();
+  }
+  refreshAfterMasterChange();
+}
+
+function renameRole(roleId, name) {
+  updateRoleById(roleId, (role) => { role.name = name; });
+}
+
+function editRoleColor(roleId, color) {
+  updateRoleById(roleId, (role) => { role.badgeColor = color; });
+}
+
+function toggleRoleFlag(roleId, flag, checked) {
+  updateRoleById(roleId, (role) => { role[flag] = !!checked; });
+}
+
+function deleteRole(roleId) {
+  const roles = safeMasterList(getRoles);
+  const role = roles.find((item) => item.id === roleId);
+  if (!role) return;
+  if (roles.length <= 1) {
+    alert('ロールは1件以上必要です。');
+    return;
+  }
+  if (!confirm(`「${role.name}」を削除しますか？`)) return;
+  const next = roles.filter((item) => item.id !== roleId);
+  saveRoles(next);
+  const fallback = next.find((item) => item.isDriver) || next[0];
+  cars.forEach((car) => {
+    if (car.driverRole === role.id || car.driverRole === role.name) car.driverRole = fallback ? fallback.id : '';
+    if (car.assistantRole === role.id || car.assistantRole === role.name) car.assistantRole = '';
+  });
+  saveData();
+  refreshAfterMasterChange();
+}
+
+function rewritePassengerCareTag(passenger, oldName, newName) {
+  if (!passenger) return;
+  const tags = explicitCareTags(passenger).map((tag) => (tag === oldName ? newName : tag)).filter(Boolean);
+  passenger.careTags = tags;
+  passenger.positions = tags.slice();
+  passenger.pos = tags[0] || '';
+  if (oldName.indexOf('酔') !== -1 && (!newName || newName.indexOf('酔') === -1)) passenger.motionSick = false;
+  if (newName && newName.indexOf('酔') !== -1) passenger.motionSick = true;
+}
+
+function addCareTagFromInput() {
+  const nameInput = document.getElementById('newCareTagName');
+  const colorInput = document.getElementById('newCareTagColor');
+  const disperseInput = document.getElementById('newCareTagDisperse');
+  const name = nameInput ? nameInput.value.trim() : '';
+  if (!name) {
+    alert('タグ名を入力してください。');
+    return;
+  }
+  const tags = safeMasterList(getCareTags);
+  if (tags.some((tag) => tag.name === name)) {
+    alert('すでに登録されています。');
+    return;
+  }
+  const color = colorInput && colorInput.value ? colorInput.value : '#d97706';
+  tags.push({
+    id: `tag_custom_${Date.now()}`,
+    name: name,
+    color: color,
+    textColor: contrastTextColor(color),
+    requiredFeature: '',
+    preventCoOccurrence: !!(disperseInput && disperseInput.checked),
+    requireAssistant: false,
+    requireFrontSeat: name.indexOf('酔') !== -1,
+    requireAssistantRole: ''
+  });
+  saveCareTags(tags);
+  if (nameInput) nameInput.value = '';
+  if (disperseInput) disperseInput.checked = false;
+  refreshAfterMasterChange();
+}
+
+function updateCareTagById(tagId, mutate) {
+  const tags = safeMasterList(getCareTags);
+  const tag = tags.find((item) => item.id === tagId);
+  if (!tag) return;
+  const prevName = tag.name;
+  mutate(tag);
+  tag.name = textOrEmpty(tag.name).slice(0, 40);
+  if (!tag.name) {
+    alert('タグ名を入力してください。');
+    renderRoleMaster();
+    return;
+  }
+  if (tags.some((item) => item !== tag && item.name === tag.name)) {
+    alert('すでに登録されています。');
+    renderRoleMaster();
+    return;
+  }
+  tag.textColor = contrastTextColor(tag.color);
+  saveCareTags(tags);
+  if (prevName !== tag.name) {
+    children.forEach((child) => rewritePassengerCareTag(child, prevName, tag.name));
+    saveData();
+  }
+  refreshAfterMasterChange();
+}
+
+function renameCareTag(tagId, name) {
+  updateCareTagById(tagId, (tag) => { tag.name = name; });
+}
+
+function editCareTagColor(tagId, color) {
+  updateCareTagById(tagId, (tag) => { tag.color = color; });
+}
+
+function toggleCareTagDisperse(tagId, checked) {
+  updateCareTagById(tagId, (tag) => { tag.preventCoOccurrence = !!checked; });
+}
+
+function deleteCareTag(tagId) {
+  const tags = safeMasterList(getCareTags);
+  const tag = tags.find((item) => item.id === tagId);
+  if (!tag) return;
+  if (!confirm(`「${tag.name}」を削除しますか？`)) return;
+  saveCareTags(tags.filter((item) => item.id !== tagId));
+  children.forEach((child) => rewritePassengerCareTag(child, tag.name, ''));
+  saveData();
+  refreshAfterMasterChange();
 }
 
 function addDriverRoleFromInput() {
-  addRoleLabel('driverRoleInput', getDriverRoles, saveDriverRoles, 'ドライバーラベルを入力してください。');
+  addRoleFromInput();
 }
 
 function addCompanionRoleFromInput() {
-  addRoleLabel('companionRoleInput', getCompanionRoles, saveCompanionRoles, '同乗者ラベルを入力してください。');
-}
-
-function removeRoleLabel(label, getter, saver) {
-  const name = typeof label === 'string' ? label.trim() : '';
-  if (!name) return;
-  saver(getter().filter((item) => item !== name));
-  renderCars();
-  renderChildren();
+  const assistantInput = document.getElementById('newRoleAssistant');
+  if (assistantInput) assistantInput.checked = true;
+  addRoleFromInput();
 }
 
 function removeDriverRole(label) {
-  removeRoleLabel(label, getDriverRoles, saveDriverRoles);
+  const role = findStaffRole(label);
+  if (role) deleteRole(role.id);
 }
 
 function removeCompanionRole(label) {
-  removeRoleLabel(label, getCompanionRoles, saveCompanionRoles);
+  const role = findStaffRole(label);
+  if (!role) return;
+  toggleRoleFlag(role.id, 'isAssistant', false);
 }
 
 function resetRoleLabelsToDefault() {
+  if (!confirm('スタッフ・ロールと要配慮タグを初期値に戻しますか？')) return;
   resetRoleLabels();
-  const driverInput = document.getElementById('driverRoleInput');
-  const companionInput = document.getElementById('companionRoleInput');
-  if (driverInput) driverInput.value = '';
-  if (companionInput) companionInput.value = '';
-  renderCars();
-  renderChildren();
+  const roleInput = document.getElementById('newRoleName');
+  const tagInput = document.getElementById('newCareTagName');
+  if (roleInput) roleInput.value = '';
+  if (tagInput) tagInput.value = '';
+  refreshAfterMasterChange();
+}
+
+function selectedCareNames(raw) {
+  return parseCareTagInput(raw);
+}
+
+function renderCarePills(scope) {
+  const hidden = document.getElementById(scope === 'edit' ? 'editChildPos' : 'newChildPos');
+  const host = document.getElementById(scope === 'edit' ? 'editChildCarePills' : 'newChildCarePills');
+  if (!host) return;
+  const selected = hidden ? selectedCareNames(hidden.value) : [];
+  const tags = safeMasterList(typeof getCareTags === 'function' ? getCareTags : null);
+  if (!tags.length) {
+    host.innerHTML = '<span class="role-tag-empty">要配慮タグがありません</span>';
+    return;
+  }
+  host.innerHTML = tags.map((tag) => {
+    const on = selected.indexOf(tag.name) !== -1 || selected.indexOf(tag.id) !== -1;
+    const style = on
+      ? ` style="background:${escapeRoleText(tag.color)};color:${escapeRoleText(tag.textColor || '#ffffff')};border-color:${escapeRoleText(tag.color)}"`
+      : '';
+    return `<button type="button" class="care-pill${on ? ' is-selected' : ''}" data-action="toggle-care-pill" data-scope="${scope}" data-tag-id="${escapeRoleText(tag.id)}" aria-pressed="${on ? 'true' : 'false'}"${style}>${escapeRoleText(tag.name)}</button>`;
+  }).join('');
+}
+
+function sicknessTagNames() {
+  return safeMasterList(typeof getCareTags === 'function' ? getCareTags : null)
+    .filter((tag) => tag.requireFrontSeat || textOrEmpty(tag.name).indexOf('酔') !== -1)
+    .map((tag) => tag.name);
+}
+
+function toggleCarePill(scope, tagId) {
+  const hidden = document.getElementById(scope === 'edit' ? 'editChildPos' : 'newChildPos');
+  const tag = findCareTagMeta(tagId);
+  if (!hidden || !tag) return;
+  const selected = selectedCareNames(hidden.value).filter((name) => name !== tag.id);
+  const index = selected.indexOf(tag.name);
+  if (index === -1) selected.push(tag.name);
+  else selected.splice(index, 1);
+  hidden.value = selected.join(', ');
+  const motion = document.getElementById(scope === 'edit' ? 'editChildMotionSick' : 'newChildMotionSick');
+  if (motion && (tag.requireFrontSeat || tag.name.indexOf('酔') !== -1)) motion.checked = index === -1;
+  renderCarePills(scope);
+}
+
+function syncMotionSickPills(scope, checked) {
+  const hidden = document.getElementById(scope === 'edit' ? 'editChildPos' : 'newChildPos');
+  if (!hidden) return;
+  const sickness = sicknessTagNames();
+  let selected = selectedCareNames(hidden.value);
+  if (checked) {
+    sickness.forEach((name) => {
+      if (selected.indexOf(name) === -1) selected.push(name);
+    });
+  } else {
+    selected = selected.filter((name) => sickness.indexOf(name) === -1);
+  }
+  hidden.value = selected.join(', ');
+  renderCarePills(scope);
 }
 
 function buildCompanionChipsHtml(car) {
@@ -853,9 +1366,11 @@ function renderCars() {
   updateCarSortToggleButton();
   getSortedCarsForRender().forEach((car) => {
     const summary = carSeatSummary(car);
-    const inactiveClass = car.active ? '' : 'is-inactive';
+    const runsToday = vehicleOperatesOnSelectedDay(car);
+    const inService = vehicleInServiceOnSelectedDay(car);
+    const inactiveClass = inService ? '' : 'is-inactive';
     const fullBlock = summary.isFull || summary.isOver;
-    const addDisabled = !car.active || fullBlock ? 'disabled' : '';
+    const addDisabled = !inService || fullBlock ? 'disabled' : '';
     const carChips = buildCompanionChipsHtml(car);
     const orderIndex = cars.findIndex((c) => String(c.id) === String(car.id));
     const isFirst = orderIndex <= 0;
@@ -872,7 +1387,7 @@ function renderCars() {
       <div class="car-card ${inactiveClass}${specialVehicle ? ' is-equipment is-special' : ''}" data-car-id="${car.id}">
         <div class="car-card-header">
           <label class="car-name-label">
-            <input type="checkbox" data-action="toggle-car" data-id="${car.id}" ${car.active ? 'checked' : ''}>
+            <input type="checkbox" data-action="toggle-car" data-id="${car.id}" ${inService ? 'checked' : ''} ${runsToday ? '' : 'disabled'} title="${runsToday ? 'この日の稼働' : 'この曜日は運行予定外'}">
             <input type="text" class="car-name-input" data-action="rename-car" data-id="${car.id}"
               value="${safeName}" maxlength="40" title="車両名（変更すると参照も連動更新）" aria-label="車両名">
           </label>
@@ -901,6 +1416,7 @@ function renderCars() {
           ${carChips ? `<div class="companion-chips">${carChips}</div>` : ''}
           <div class="companion-add-row">
             ${buildDriverSelectHtml(car)}
+            ${buildAssistantSelectHtml(car)}
             ${buildQuickCompanionButtonsHtml(car, !!addDisabled)}
             <input type="text" class="companion-input" id="companionInput-${car.id}" placeholder="名前" ${addDisabled} maxlength="20">
             <button type="button" class="companion-add-btn" data-action="add-companion-custom" data-id="${car.id}" ${addDisabled}>＋</button>
@@ -923,17 +1439,14 @@ function buildChildCompanionChipsHtml(child) {
   `).join('');
 }
 
-function renderChildren() {
-  const list = document.getElementById('childList');
-  if (!list) return;
-  list.innerHTML = '';
-  const select = document.getElementById('childSortModeSelect');
-  if (select && select.value !== childSortMode) select.value = childSortMode;
-
-  getSortedChildrenForRender().forEach((c) => {
+function childRowHtml(c) {
+  const status = passengerDayStatus(c);
+  const view = dayStatusView(status);
+  const rosterLocked = status === 'absent' || status === 'off' || status === 'paused';
+  const rowClass = status === 'absent' ? 'is-absent' : (status === 'off' || status === 'paused' ? 'is-off' : '');
     const mode = getAttendMode(c);
-    const fixedDisabled = mode !== 'ride' ? 'disabled' : '';
-    const companionDisabled = mode !== 'ride' ? 'disabled' : '';
+    const fixedDisabled = mode !== 'ride' || rosterLocked ? 'disabled' : '';
+    const companionDisabled = mode !== 'ride' || rosterLocked ? 'disabled' : '';
     if (mode !== 'ride') openChildCompanionEditors.delete(Number(c.id));
     const editorOpen = mode === 'ride' && openChildCompanionEditors.has(Number(c.id));
     const chipsHtml = buildChildCompanionChipsHtml(c);
@@ -942,18 +1455,19 @@ function renderChildren() {
     const fixedVehicleName = passengerFixedVehicleName(c);
     const careBadges = buildCareTagBadgesHtml(c);
 
-    list.innerHTML += `
-      <div class="item-row item-row-child">
+    return `
+      <div class="item-row item-row-child ${rowClass}">
         <div class="item-main">
           <div class="child-top-row">
-            <select class="attend-select" data-action="set-attend" data-id="${c.id}">
+            <button type="button" class="day-status ${view.className}" data-action="toggle-day-status" data-id="${c.id}" ${status === 'paused' ? 'disabled' : ''}>${view.label}</button>
+            <select class="attend-select" data-action="set-attend" data-id="${c.id}" ${rosterLocked ? 'disabled' : ''}>
               <option value="off" ${mode === 'off' ? 'selected' : ''}>欠席</option>
               <option value="ride" ${mode === 'ride' ? 'selected' : ''}>乗車</option>
               <option value="site" ${mode === 'site' ? 'selected' : ''}>現地</option>
             </select>
             <span class="child-name">${c.name}</span>
             ${chipsHtml}
-            ${mode === 'ride' && !editorOpen ? `
+            ${mode === 'ride' && !editorOpen && !rosterLocked ? `
               <button type="button" class="btn-add-companion" data-action="open-child-companion" data-id="${c.id}">＋同乗</button>
             ` : ''}
             ${groupLabel ? `<span class="badge-sub">${escapeRoleText(groupLabel)}</span>` : ''}
@@ -985,7 +1499,30 @@ function renderChildren() {
         </div>
       </div>
     `;
+}
+
+function renderChildren() {
+  const list = document.getElementById('childList');
+  if (!list) return;
+  list.innerHTML = '';
+  const select = document.getElementById('childSortModeSelect');
+  if (select && select.value !== childSortMode) select.value = childSortMode;
+
+  const roster = [];
+  const resting = [];
+  getSortedChildrenForRender().forEach((c) => {
+    const status = passengerDayStatus(c);
+    if (status === 'off' || status === 'paused') resting.push(c);
+    else roster.push(c);
   });
+  if (roster.length) {
+    list.innerHTML += `<p class="child-group-label">この曜日の利用者 ${roster.length}名</p>`;
+    roster.forEach((c) => { list.innerHTML += childRowHtml(c); });
+  }
+  if (resting.length) {
+    list.innerHTML += `<p class="child-group-label">お休み ${resting.length}名（タップで当日スポット）</p>`;
+    resting.forEach((c) => { list.innerHTML += childRowHtml(c); });
+  }
 }
 
 function refreshLists() {
@@ -995,9 +1532,24 @@ function refreshLists() {
 }
 
 function toggleCar(id, checked) {
-  const c = cars.find(x => x.id === id);
+  const c = cars.find(x => String(x.id) === String(id));
   if (!c) return;
-  c.active = typeof checked === 'boolean' ? checked : !c.active;
+  if (!vehicleOperatesOnSelectedDay(c)) {
+    renderCars();
+    return;
+  }
+  const date = getSelectedServiceDate();
+  const override = getDailyOverride(date);
+  const ids = override.outOfServiceVehicleIds.map(String).filter((item) => item !== String(c.id));
+  const nextOn = typeof checked === 'boolean' ? checked : !vehicleInServiceOnSelectedDay(c);
+  if (!nextOn) ids.push(String(c.id));
+  if (nextOn) c.active = true;
+  saveDailyOverride(date, {
+    date: date,
+    absentPassengerIds: override.absentPassengerIds,
+    spotPassengerIds: override.spotPassengerIds,
+    outOfServiceVehicleIds: ids
+  });
   saveData();
   refreshLists();
 }
@@ -1041,8 +1593,24 @@ function commitCarRename(id, newName) {
 }
 
 function setChildAttend(id, mode) {
-  const ch = children.find(x => x.id === id);
+  const ch = children.find(x => String(x.id) === String(id));
   if (!ch) return;
+  if (mode === 'off') {
+    const date = getSelectedServiceDate();
+    const override = getDailyOverride(date);
+    const sid = String(ch.id);
+    const absent = override.absentPassengerIds.map(String).filter((item) => item !== sid);
+    const spot = override.spotPassengerIds.map(String).filter((item) => item !== sid);
+    absent.push(sid);
+    saveDailyOverride(date, {
+      date: date,
+      absentPassengerIds: absent,
+      spotPassengerIds: spot,
+      outOfServiceVehicleIds: override.outOfServiceVehicleIds
+    });
+    refreshLists();
+    return;
+  }
   setAttendMode(ch, mode);
   saveData();
   refreshLists();
@@ -1116,7 +1684,7 @@ function removeChildCompanion(childId, companionId) {
 function addCompanion(carId, label) {
   const car = cars.find(x => x.id === carId);
   const name = (label || '').trim();
-  if (!car || !car.active || !name) return;
+  if (!car || !vehicleInServiceOnSelectedDay(car) || !name) return;
 
   if (!canFitOnCar(car, 1)) {
     alert(`「${car.name}」は満席です。`);
@@ -1180,10 +1748,18 @@ function openEditModal(id) {
   document.getElementById('editChildId').value = kid.id;
   document.getElementById('editChildName').value = kid.name;
   document.getElementById('editChildGrade').value = textOrEmpty(passengerGroupClass(kid));
-  document.getElementById('editChildPos').value = careTagsInputValue(kid);
-  document.getElementById('editChildMotionSick').checked = !!kid.motionSick;
+  document.getElementById('editChildPos').value = passengerCareTags(kid).join(', ');
+  renderSchedulePills('edit', kid.schedulePattern);
+  document.getElementById('editChildMotionSick').checked = !!kid.motionSick || passengerCareTags(kid).some((tag) => tag.indexOf('酔') !== -1);
+  renderCarePills('edit');
   updateCarSelectOptions();
   document.getElementById('editChildParentCar').value = passengerFixedVehicleName(kid);
+  const addressInput = document.getElementById('editChildAddress');
+  const latInput = document.getElementById('editChildLat');
+  const lngInput = document.getElementById('editChildLng');
+  if (addressInput) addressInput.value = kid.address || '';
+  if (latInput) latInput.value = kid.lat == null ? '' : String(kid.lat);
+  if (lngInput) lngInput.value = kid.lng == null ? '' : String(kid.lng);
   const fixedSelect = document.getElementById('editChildFixedCar');
   if (fixedSelect) {
     fixedSelect.innerHTML = buildFixedCarOptionsHtml(kid.fixedCar || '', kid);
@@ -1205,8 +1781,10 @@ function saveEditChild() {
   if (kid) {
     kid.name = document.getElementById('editChildName').value.trim() || kid.name;
     applyGroupClass(kid, document.getElementById('editChildGrade').value);
+    kid.schedulePattern = selectedScheduleDays('edit');
     applyCareTagInput(kid, document.getElementById('editChildPos').value, document.getElementById('editChildMotionSick').checked);
     applyFixedVehicle(kid, document.getElementById('editChildParentCar').value);
+    applyPassengerPlace(kid, 'edit');
 
     const nextFixed = document.getElementById('editChildFixedCar').value || '';
     if (nextFixed) {
@@ -1296,13 +1874,20 @@ function addChild() {
       motionSick: false,
       companions: [],
       active: true,
+      isActive: true,
       meetOnSite: false,
+      schedulePattern: selectedScheduleDays('new'),
+      address: '',
+      lat: null,
+      lng: null,
+      boardingTimeMinutes: null,
       lastCar: '',
       rideHistory: {}
     });
     applyGroupClass(passenger, gradeRaw);
     applyFixedVehicle(passenger, parent);
     applyCareTagInput(passenger, posRaw, motionSick);
+    applyPassengerPlace(passenger, 'new');
     children.push(passenger);
     saveData();
     refreshLists();
@@ -1310,7 +1895,15 @@ function addChild() {
     if (gradeInput) gradeInput.value = '';
     if (posInput) posInput.value = '';
     if (parentSelect) parentSelect.value = '';
+    const addressInput = document.getElementById('newChildAddress');
+    const latInput = document.getElementById('newChildLat');
+    const lngInput = document.getElementById('newChildLng');
+    if (addressInput) addressInput.value = '';
+    if (latInput) latInput.value = '';
+    if (lngInput) lngInput.value = '';
     if (motionInput) motionInput.checked = false;
+    renderCarePills('new');
+    renderSchedulePills('new', WEEKDAY_KEYS.slice());
   } else {
     alert("利用者の名前を入力してください");
   }
@@ -1335,6 +1928,170 @@ function applyRestore() {
   if (restoreBackupData(text)) {
     closeRestoreModal();
   }
+}
+
+function applyPassengerPlace(passenger, scope) {
+  if (!passenger) return;
+  const prefix = scope === 'edit' ? 'editChild' : 'newChild';
+  const addressEl = document.getElementById(`${prefix}Address`);
+  const latEl = document.getElementById(`${prefix}Lat`);
+  const lngEl = document.getElementById(`${prefix}Lng`);
+  passenger.address = addressEl ? addressEl.value.trim().slice(0, 120) : '';
+  passenger.lat = normalizeCoord(latEl ? latEl.value : '', -90, 90);
+  passenger.lng = normalizeCoord(lngEl ? lngEl.value : '', -180, 180);
+}
+
+let routePlanBase = '';
+
+function readDepartureTime() {
+  const input = document.getElementById('departureTimeInput');
+  const facility = getFacility();
+  return normalizeClock(input && input.value ? input.value : '') || facility.defaultDepartureTime;
+}
+
+function syncFacilityInputs() {
+  const facility = getFacility();
+  const time = document.getElementById('departureTimeInput');
+  const caption = document.getElementById('facilityCaption');
+  const name = document.getElementById('facilityNameInput');
+  const lat = document.getElementById('facilityLatInput');
+  const lng = document.getElementById('facilityLngInput');
+  if (time) time.value = facility.defaultDepartureTime;
+  if (caption) caption.textContent = `出発地: ${facility.name}`;
+  if (name && document.activeElement !== name) name.value = facility.name;
+  if (lat && document.activeElement !== lat) lat.value = String(facility.lat);
+  if (lng && document.activeElement !== lng) lng.value = String(facility.lng);
+}
+
+function setDepartureTime(value) {
+  const time = normalizeClock(value) || getFacility().defaultDepartureTime;
+  saveFacility({ defaultDepartureTime: time });
+  syncFacilityInputs();
+  const card = document.getElementById('resultCard');
+  if (routePlanBase && currentAssignments && card && card.style.display !== 'none') {
+    publishRouteTimeline(routePlanBase);
+  }
+}
+
+function setFacilityName(value) {
+  saveFacility({ name: value });
+  syncFacilityInputs();
+  refreshRouteIfVisible();
+}
+
+function setFacilityCoord(which, value) {
+  if (which !== 'lat' && which !== 'lng') return;
+  const current = getFacility();
+  const next = which === 'lat' ? normalizeCoord(value, -90, 90) : normalizeCoord(value, -180, 180);
+  if (next == null) {
+    syncFacilityInputs();
+    return;
+  }
+  const patch = which === 'lat' ? { lat: next, lng: current.lng } : { lat: current.lat, lng: next };
+  saveFacility(patch);
+  syncFacilityInputs();
+  refreshRouteIfVisible();
+}
+
+function refreshRouteIfVisible() {
+  const card = document.getElementById('resultCard');
+  if (routePlanBase && currentAssignments && card && card.style.display !== 'none') {
+    publishRouteTimeline(routePlanBase);
+  }
+}
+
+function stripRouteSection(text) {
+  return String(text || '').replace(/\n*【巡回時刻】[\s\S]*?(?=-----+\nよろしくお願いいたします。)/, '\n');
+}
+
+function mergeRouteIntoPlan(baseText, schedules) {
+  const block = formatRouteScheduleText(schedules);
+  const closing = '---------------------\nよろしくお願いいたします。';
+  const base = stripRouteSection(baseText);
+  if (!block) return base;
+  if (base.indexOf(closing) >= 0) return base.replace(closing, `${block}\n${closing}`);
+  return `${base.replace(/\s*$/, '\n')}${block}\n`;
+}
+
+function buildCurrentRouteSchedules() {
+  if (!currentAssignments) return [];
+  const facility = getFacility();
+  const departureTime = readDepartureTime();
+  const schedules = [];
+  cars.forEach((car) => {
+    const riders = currentAssignments[car.name];
+    if (!Array.isArray(riders) || !riders.length) return;
+    try {
+      schedules.push(optimizeRouteSchedule({
+        vehicle: car,
+        passengers: riders,
+        facility,
+        departureTime
+      }));
+    } catch (e) {
+      schedules.push({
+        vehicle: car,
+        timeline: [],
+        totalMinutes: 0,
+        approximated: true,
+        route: riders.slice()
+      });
+    }
+  });
+  return schedules;
+}
+
+function renderRouteTimeline(schedules) {
+  const root = document.getElementById('routeTimeline');
+  if (!root) return;
+  const list = Array.isArray(schedules) ? schedules : [];
+  if (!list.length) {
+    root.innerHTML = '';
+    return;
+  }
+  root.innerHTML = list.map((schedule) => {
+    const vehicleName = escapeRoleText(schedule.vehicle && schedule.vehicle.name ? schedule.vehicle.name : '車両');
+    const stops = (schedule.timeline || []).map((stop) => {
+      if (stop.type === 'depot_start') {
+        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span>出発: ${escapeRoleText(stop.name)}</span></div>`;
+      }
+      if (stop.type === 'passenger') {
+        const tags = stop.careTags && stop.careTags.length ? ` [${escapeRoleText(stop.careTags.join('、'))}]` : '';
+        const address = stop.address ? `<div class="route-address">${escapeRoleText(stop.address)}</div>` : '';
+        const mapUrl = stop.mapsUrl || (typeof mapsNavigationUrl === 'function' ? mapsNavigationUrl(stop) : '');
+        const mapLink = mapUrl
+          ? `<a class="route-map" href="${escapeRoleText(mapUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(stop.name)}の案内をGoogleマップで開く">📍 地図</a>`
+          : '';
+        return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
+          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}着 - ${escapeRoleText(stop.departureTime)}発</span><span class="route-stop-body">${escapeRoleText(stop.name)}${tags} <em class="route-dwell">乗降${stop.dwellMinutes}分</em></span>${mapLink}</div>${address}`;
+      }
+      if (stop.type === 'depot_end') {
+        return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
+          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}</span><span>到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</span></div>`;
+      }
+      return '';
+    }).join('');
+    const note = schedule.approximated ? '<p class="route-note">座標がない区間は登録順のまま、目安5分で積算しています。</p>' : '';
+    return `<section class="route-card"><h3>${vehicleName}の巡回</h3>${stops}${note}</section>`;
+  }).join('');
+}
+
+function publishRouteTimeline(baseText) {
+  routePlanBase = stripRouteSection(baseText || '');
+  const schedules = buildCurrentRouteSchedules();
+  renderRouteTimeline(schedules);
+  lastGeneratedPlan = mergeRouteIntoPlan(routePlanBase, schedules);
+}
+
+function runDispatchWithRoute() {
+  generateCarpool();
+  const card = document.getElementById('resultCard');
+  if (!card || card.style.display === 'none' || !currentAssignments) {
+    routePlanBase = '';
+    renderRouteTimeline([]);
+    return;
+  }
+  publishRouteTimeline(lastGeneratedPlan);
 }
 
 /** 初回ガイド（オンボーディング） */
@@ -1462,7 +2219,22 @@ bindCarReorderGestures();
     reorderCar,
     formatCarCompanionHeader,
     setCarDriverRole,
+    setCarAssistantRole,
     renderRoleMaster,
+    switchMasterTab,
+    addRoleFromInput,
+    renameRole,
+    editRoleColor,
+    toggleRoleFlag,
+    deleteRole,
+    addCareTagFromInput,
+    renameCareTag,
+    editCareTagColor,
+    toggleCareTagDisperse,
+    deleteCareTag,
+    toggleCarePill,
+    syncMotionSickPills,
+    renderCarePills,
     toggleRoleMaster,
     addDriverRoleFromInput,
     addCompanionRoleFromInput,
@@ -1470,6 +2242,18 @@ bindCarReorderGestures();
     removeCompanionRole,
     resetRoleLabelsToDefault,
     syncDispatchPeriodSelect,
+    getSelectedServiceDate,
+    setServiceDate,
+    setServiceWeekday,
+    syncServiceDateBar,
+    renderSchedulePills,
+    toggleScheduleDay,
+    togglePassengerDayStatus,
+    runDispatchWithRoute,
+    setDepartureTime,
+    setFacilityName,
+    setFacilityCoord,
+    syncFacilityInputs,
     get childSortMode() { return childSortMode; },
     get carSortMode() { return carSortMode; },
     openRestoreModal,

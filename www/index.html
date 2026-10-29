@@ -10,11 +10,26 @@
 <meta name="apple-mobile-web-app-title" content="送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029d">
+<link rel="stylesheet" href="css/style.css?v=20261029h">
 </head>
 <body>
 
 <h1>shuttle-planner 送迎計画最適化</h1>
+
+<div class="service-date-bar" id="serviceDateBar">
+  <label class="service-date-label">
+    <span id="serviceDateCaption">本日</span>
+    <input type="date" id="serviceDateInput" data-action="set-service-date" aria-label="運行日">
+  </label>
+  <div class="weekday-quick" role="group" aria-label="曜日を切り替える">
+    <button type="button" class="weekday-btn" data-action="set-service-weekday" data-day="mon">月</button>
+    <button type="button" class="weekday-btn" data-action="set-service-weekday" data-day="tue">火</button>
+    <button type="button" class="weekday-btn" data-action="set-service-weekday" data-day="wed">水</button>
+    <button type="button" class="weekday-btn" data-action="set-service-weekday" data-day="thu">木</button>
+    <button type="button" class="weekday-btn" data-action="set-service-weekday" data-day="fri">金</button>
+    <button type="button" class="weekday-btn" data-action="set-service-weekday" data-day="sat">土</button>
+  </div>
+</div>
 
 <!-- リアルタイム状況バー -->
 <div class="status-bar" id="statusBar">
@@ -96,18 +111,43 @@
           <span>区分 / クラス</span>
           <input type="text" id="newChildGrade" placeholder="例: 小学部, A組, デイ" maxlength="20" aria-label="区分 / クラス">
         </label>
-        <label class="add-field">
+        <div class="add-field add-field-tags">
           <span>要配慮タグ</span>
-          <input type="text" id="newChildPos" placeholder="例: 車椅子, 見守り, 車酔い" maxlength="40" aria-label="要配慮タグ">
-        </label>
+          <div id="newChildCarePills" class="care-pill-group" role="group" aria-label="要配慮タグ"></div>
+          <input type="hidden" id="newChildPos" value="">
+        </div>
         <label class="add-field">
           <span>専用車両拘束</span>
           <select id="newChildParentCar" aria-label="専用車両拘束">
             <option value="">専用車両: なし</option>
           </select>
         </label>
+        <label class="add-field">
+          <span>住所</span>
+          <input type="text" id="newChildAddress" placeholder="例: 山口県下関市○○町1-2-3" maxlength="120" aria-label="住所">
+        </label>
+        <label class="add-field">
+          <span>緯度（任意）</span>
+          <input type="number" id="newChildLat" placeholder="33.9620" step="0.0001" aria-label="緯度">
+        </label>
+        <label class="add-field">
+          <span>経度（任意）</span>
+          <input type="number" id="newChildLng" placeholder="130.9480" step="0.0001" aria-label="経度">
+        </label>
+        <div class="add-field add-field-tags">
+          <span>定期利用曜日</span>
+          <div id="newChildWeekdays" class="weekday-toggle" role="group" aria-label="定期利用曜日">
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="mon">月</button>
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="tue">火</button>
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="wed">水</button>
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="thu">木</button>
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="fri">金</button>
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="sat">土</button>
+            <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="sun">日</button>
+          </div>
+        </div>
         <label class="inline-check-label">
-          <input type="checkbox" id="newChildMotionSick"> 車酔い配慮
+          <input type="checkbox" id="newChildMotionSick" data-action="toggle-motion-sick" data-scope="new"> 車酔い配慮
         </label>
         <button type="button" class="btn-secondary" data-action="add-child">利用者登録</button>
       </div>
@@ -128,6 +168,11 @@
       <option value="position">♿ 要配慮を分散（車椅子などの偏り防止）</option>
     </select>
   </div>
+  <div class="mode-select-box">
+    <label class="mode-label" for="departureTimeInput">出発時刻:</label>
+    <input type="time" id="departureTimeInput" value="14:30" data-action="set-departure-time" aria-label="出発時刻">
+    <span class="facility-caption" id="facilityCaption">出発地: ひまわり放課後デイ 施設</span>
+  </div>
   <button type="button" class="btn btn-primary" data-action="generate">⚡ 運行計画を生成</button>
 </div>
 
@@ -139,6 +184,7 @@
   <h2 class="card-heading">本日の送迎運行計画</h2>
   <div id="resultWarnings" class="result-warnings" hidden></div>
   <div class="result-box" id="resultText"></div>
+  <div id="routeTimeline" class="route-timeline"></div>
   <button type="button" class="btn btn-outline" data-action="generate">🔄 別の組み合わせで再計算する</button>
   <button type="button" class="btn btn-success" data-action="copy-result">📋 運行計画テキストをコピー</button>
 </div>
@@ -162,19 +208,42 @@
         <option value="180">直近半年 (180日)</option>
       </select>
     </label>
-    <button type="button" class="btn btn-secondary btn-block" id="btnToggleRoleMaster" data-action="toggle-role-master" aria-expanded="false" aria-controls="roleMasterContainer">🏷️ ドライバー・同乗者ラベルを編集 ▼</button>
+    <label class="setting-item">
+      <span>施設名</span>
+      <input type="text" id="facilityNameInput" data-action="set-facility-name" maxlength="40" aria-label="施設名">
+    </label>
+    <label class="setting-item">
+      <span>施設の緯度</span>
+      <input type="number" id="facilityLatInput" data-action="set-facility-coord" data-coord="lat" step="0.0001" aria-label="施設の緯度">
+    </label>
+    <label class="setting-item">
+      <span>施設の経度</span>
+      <input type="number" id="facilityLngInput" data-action="set-facility-coord" data-coord="lng" step="0.0001" aria-label="施設の経度">
+    </label>
+    <button type="button" class="btn btn-secondary btn-block" id="btnToggleRoleMaster" data-action="toggle-role-master" aria-expanded="false" aria-controls="roleMasterContainer">🏷️ スタッフ・ロール / 要配慮タグを編集 ▼</button>
     <div id="roleMasterContainer" class="role-master" hidden>
-      <p class="role-master-label">ドライバー</p>
-      <div id="driverRoleTags" class="role-tag-list"></div>
-      <div class="role-master-add">
-        <input type="text" id="driverRoleInput" class="role-label-input" maxlength="20" placeholder="例: ドライバー" aria-label="ドライバーラベルを追加">
-        <button type="button" class="btn btn-outline btn-compact" data-action="add-driver-role">追加</button>
+      <div class="master-tabs" role="tablist">
+        <button type="button" class="master-tab is-active" id="masterTabRoles" data-action="switch-master-tab" data-tab="roles" role="tab" aria-selected="true">スタッフ・ロール管理</button>
+        <button type="button" class="master-tab" id="masterTabTags" data-action="switch-master-tab" data-tab="tags" role="tab" aria-selected="false">要配慮タグ管理</button>
       </div>
-      <p class="role-master-label">同乗者</p>
-      <div id="companionRoleTags" class="role-tag-list"></div>
-      <div class="role-master-add">
-        <input type="text" id="companionRoleInput" class="role-label-input" maxlength="20" placeholder="例: 看護師" aria-label="同乗者ラベルを追加">
-        <button type="button" class="btn btn-outline btn-compact" data-action="add-companion-role">追加</button>
+      <div id="roleMasterPanel" data-master-panel="roles">
+        <div id="roleMasterList" class="master-list"></div>
+        <div class="role-master-add">
+          <input type="text" id="newRoleName" class="role-label-input" maxlength="40" placeholder="ロール名（例: 送迎職員）" aria-label="ロール名">
+          <input type="color" id="newRoleColor" class="master-color" value="#2563eb" aria-label="バッジカラー">
+          <label class="master-flag"><input type="checkbox" id="newRoleDriver" checked> 運転可</label>
+          <label class="master-flag"><input type="checkbox" id="newRoleAssistant"> 添乗可</label>
+          <button type="button" class="btn btn-outline btn-compact" data-action="add-role">新規追加</button>
+        </div>
+      </div>
+      <div id="careTagMasterPanel" data-master-panel="tags" hidden>
+        <div id="careTagMasterList" class="master-list"></div>
+        <div class="role-master-add">
+          <input type="text" id="newCareTagName" class="role-label-input" maxlength="40" placeholder="タグ名（例: 見守り）" aria-label="要配慮タグ名">
+          <input type="color" id="newCareTagColor" class="master-color" value="#d97706" aria-label="表示色">
+          <label class="master-flag"><input type="checkbox" id="newCareTagDisperse"> 分散配置</label>
+          <button type="button" class="btn btn-outline btn-compact" data-action="add-care-tag">新規追加</button>
+        </div>
       </div>
       <button type="button" class="btn btn-secondary btn-compact" data-action="reset-role-labels">初期値に戻す</button>
     </div>
@@ -260,8 +329,31 @@
       <input type="text" id="editChildGrade" maxlength="20" placeholder="例: 小学部, A組, デイ">
     </div>
     <div class="modal-field">
-      <label for="editChildPos">要配慮タグ</label>
-      <input type="text" id="editChildPos" maxlength="40" placeholder="例: 車椅子, 見守り, 車酔い">
+      <span id="editChildPosLabel">要配慮タグ</span>
+      <div id="editChildCarePills" class="care-pill-group" role="group" aria-labelledby="editChildPosLabel"></div>
+      <input type="hidden" id="editChildPos" value="">
+    </div>
+    <div class="modal-field">
+      <span id="editChildWeekdaysLabel">定期利用曜日</span>
+      <div id="editChildWeekdays" class="weekday-toggle" role="group" aria-labelledby="editChildWeekdaysLabel">
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="mon">月</button>
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="tue">火</button>
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="wed">水</button>
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="thu">木</button>
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="fri">金</button>
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="sat">土</button>
+        <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="sun">日</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label for="editChildAddress">住所</label>
+      <input type="text" id="editChildAddress" maxlength="120" placeholder="例: 山口県下関市○○町1-2-3">
+    </div>
+    <div class="modal-field modal-field-coords">
+      <label for="editChildLat">緯度（任意）</label>
+      <input type="number" id="editChildLat" step="0.0001" placeholder="33.9620">
+      <label for="editChildLng">経度（任意）</label>
+      <input type="number" id="editChildLng" step="0.0001" placeholder="130.9480">
     </div>
     <div class="modal-field">
       <label for="editChildParentCar">専用車両拘束</label>
@@ -277,7 +369,7 @@
     </div>
     <div class="modal-field modal-field-motion">
       <label class="motion-edit-label" for="editChildMotionSick">
-        <input type="checkbox" id="editChildMotionSick">
+        <input type="checkbox" id="editChildMotionSick" data-action="toggle-motion-sick" data-scope="edit">
         車酔い配慮（前方座席を優先）
       </label>
     </div>
@@ -288,11 +380,12 @@
   </div>
 </div>
 
-<!-- 依存順: data → ui → carpool → app（この順を崩さない） -->
-<script src="js/data.js?v=20261029d"></script>
-<script src="js/ui.js?v=20261029d"></script>
-<script src="js/carpool.js?v=20261029d"></script>
-<script src="js/app.js?v=20261029d"></script>
+<!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
+<script src="js/data.js?v=20261029h"></script>
+<script src="js/ui.js?v=20261029h"></script>
+<script src="js/carpool.js?v=20261029h"></script>
+<script src="js/route.js?v=20261029h"></script>
+<script src="js/app.js?v=20261029h"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

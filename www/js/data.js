@@ -17,12 +17,77 @@ function normalizeCompanion(item, fallbackId) {
   };
 }
 
-const DEFAULT_DRIVER_ROLES = ['ドライバー', '職員', '添乗員', 'その他'];
-const DEFAULT_COMPANION_ROLES = ['職員', '添乗員', '看護師', '保護者', 'その他'];
+const LEGACY_DEFAULT_DRIVER_ROLES = ['ドライバー', '職員', '添乗員', 'その他'];
+const LEGACY_DEFAULT_COMPANION_ROLES = ['職員', '添乗員', '看護師', '保護者', 'その他'];
+const DEFAULT_DRIVER_ROLES = LEGACY_DEFAULT_DRIVER_ROLES;
+const DEFAULT_COMPANION_ROLES = LEGACY_DEFAULT_COMPANION_ROLES;
 const LEGACY_FAMILY_ROLES = new Set(['父', '母', '祖父', '祖母', '兄', '弟', '姉', '妹', 'コーチ']);
 const DRIVER_ROLES_KEY = 'cp_driver_roles';
 const COMPANION_ROLES_KEY = 'cp_companion_roles';
-const ROLE_LABEL_MAX = 20;
+const ROLE_LABEL_MAX = 40;
+const STORAGE_KEYS = {
+  ROLES: 'shuttle_roles_v1',
+  CARE_TAGS: 'shuttle_care_tags_v1',
+  DAILY_OVERRIDE: 'shuttle_daily_override_v1',
+  FACILITY: 'shuttle_facility_v1'
+};
+
+const DEFAULT_FACILITY = {
+  name: 'ひまわり放課後デイ 施設',
+  lat: 33.9575,
+  lng: 130.9415,
+  defaultDepartureTime: '14:30'
+};
+
+const ALL_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const JS_DAY_TO_KEY = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+const DEFAULT_ROLES = [
+  { id: 'role_driver', name: '運転手（職員）', isDriver: true, isAssistant: false, badgeColor: '#2563eb' },
+  { id: 'role_outsource', name: '委託ドライバー', isDriver: true, isAssistant: false, badgeColor: '#4b5563' },
+  { id: 'role_instructor', name: '児童指導員 / 介護職', isDriver: true, isAssistant: true, badgeColor: '#059669' },
+  { id: 'role_nurse', name: '看護師（医療ケア）', isDriver: false, isAssistant: true, badgeColor: '#dc2626' }
+];
+
+const DEFAULT_CARE_TAGS = [
+  {
+    id: 'tag_wheelchair',
+    name: '車椅子',
+    color: '#d97706',
+    textColor: '#ffffff',
+    requiredFeature: 'リフト',
+    preventCoOccurrence: true
+  },
+  {
+    id: 'tag_single_ng',
+    name: '単独乗車NG',
+    color: '#ea580c',
+    textColor: '#ffffff',
+    requireAssistant: true,
+    preventCoOccurrence: true
+  },
+  {
+    id: 'tag_sickness',
+    name: '車酔い配慮',
+    color: '#ef4444',
+    textColor: '#ffffff',
+    requireFrontSeat: true,
+    preventCoOccurrence: false
+  },
+  {
+    id: 'tag_medical',
+    name: '医療的ケア',
+    color: '#7c3aed',
+    textColor: '#ffffff',
+    requireAssistantRole: 'role_nurse',
+    preventCoOccurrence: false
+  }
+];
+
+let staffRoles = [];
+let careTagMaster = [];
+let careTagMasterReady = false;
 
 function sanitizeRoleList(value) {
   if (!Array.isArray(value)) return null;
@@ -64,31 +129,361 @@ function writeRoleList(key, list) {
   return clean;
 }
 
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isHexColor(value) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim());
+}
+
+function textColorForHex(hex) {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(hex || '');
+  if (!match) return '#ffffff';
+  const n = parseInt(match[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const y = (r * 299 + g * 587 + b * 114) / 1000;
+  return y > 160 ? '#1e293b' : '#ffffff';
+}
+
+function listsEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  return a.every((item, index) => item === b[index]);
+}
+
+function readJsonStorage(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null || raw === '') return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function sanitizeRole(item, index) {
+  if (!item || typeof item !== 'object') return null;
+  const name = typeof item.name === 'string' ? item.name.trim().slice(0, ROLE_LABEL_MAX) : '';
+  if (!name) return null;
+  const rawId = typeof item.id === 'string' ? item.id.trim().slice(0, 48) : '';
+  const badgeColor = isHexColor(item.badgeColor) ? item.badgeColor.toLowerCase() : '#2563eb';
+  return {
+    id: rawId || `role_custom_${index + 1}`,
+    name: name,
+    isDriver: !!item.isDriver,
+    isAssistant: !!item.isAssistant,
+    badgeColor: badgeColor
+  };
+}
+
+function sanitizeRoles(value) {
+  if (!Array.isArray(value)) return [];
+  const seenId = new Set();
+  const seenName = new Set();
+  const list = [];
+  value.forEach((item, index) => {
+    const role = sanitizeRole(item, index);
+    if (!role || seenName.has(role.name)) return;
+    let id = role.id;
+    let n = 2;
+    while (seenId.has(id)) {
+      id = `${role.id}_${n}`;
+      n += 1;
+    }
+    role.id = id;
+    seenId.add(id);
+    seenName.add(role.name);
+    list.push(role);
+  });
+  return list;
+}
+
+function sanitizeCareTag(item, index) {
+  if (!item || typeof item !== 'object') return null;
+  const name = typeof item.name === 'string' ? item.name.trim().slice(0, 40) : '';
+  if (!name) return null;
+  const rawId = typeof item.id === 'string' ? item.id.trim().slice(0, 48) : '';
+  const color = isHexColor(item.color) ? item.color.toLowerCase() : '#d97706';
+  const textColor = isHexColor(item.textColor) ? item.textColor.toLowerCase() : textColorForHex(color);
+  const feature = typeof item.requiredFeature === 'string' ? item.requiredFeature.trim().slice(0, 40) : '';
+  const assistantRole = typeof item.requireAssistantRole === 'string' ? item.requireAssistantRole.trim().slice(0, 48) : '';
+  return {
+    id: rawId || `tag_custom_${index + 1}`,
+    name: name,
+    color: color,
+    textColor: textColor,
+    requiredFeature: feature,
+    preventCoOccurrence: !!item.preventCoOccurrence,
+    requireAssistant: !!item.requireAssistant,
+    requireFrontSeat: !!item.requireFrontSeat,
+    requireAssistantRole: assistantRole
+  };
+}
+
+function sanitizeCareTags(value) {
+  if (!Array.isArray(value)) return [];
+  const seenId = new Set();
+  const seenName = new Set();
+  const list = [];
+  value.forEach((item, index) => {
+    const tag = sanitizeCareTag(item, index);
+    if (!tag || seenName.has(tag.name)) return;
+    let id = tag.id;
+    let n = 2;
+    while (seenId.has(id)) {
+      id = `${tag.id}_${n}`;
+      n += 1;
+    }
+    tag.id = id;
+    seenId.add(id);
+    seenName.add(tag.name);
+    list.push(tag);
+  });
+  return list;
+}
+
+function defaultRoles() {
+  return sanitizeRoles(cloneJson(DEFAULT_ROLES));
+}
+
+function defaultCareTags() {
+  return sanitizeCareTags(cloneJson(DEFAULT_CARE_TAGS));
+}
+
+function migrateLegacyRoleLists() {
+  const drivers = sanitizeRoleList(readJsonStorage(DRIVER_ROLES_KEY));
+  const companions = sanitizeRoleList(readJsonStorage(COMPANION_ROLES_KEY));
+  if (!drivers && !companions) return defaultRoles();
+  const driverList = drivers || [];
+  const companionList = companions || [];
+  if (
+    listsEqual(driverList, LEGACY_DEFAULT_DRIVER_ROLES) &&
+    listsEqual(companionList, LEGACY_DEFAULT_COMPANION_ROLES)
+  ) {
+    return defaultRoles();
+  }
+  const palette = ['#2563eb', '#4b5563', '#059669', '#dc2626', '#7c3aed', '#0891b2'];
+  const byName = new Map();
+  driverList.forEach((name) => {
+    if (byName.has(name)) return;
+    byName.set(name, {
+      id: `role_migrated_${byName.size + 1}`,
+      name: name,
+      isDriver: true,
+      isAssistant: false,
+      badgeColor: palette[byName.size % palette.length]
+    });
+  });
+  companionList.forEach((name) => {
+    const existing = byName.get(name);
+    if (existing) {
+      existing.isAssistant = true;
+      return;
+    }
+    byName.set(name, {
+      id: `role_migrated_${byName.size + 1}`,
+      name: name,
+      isDriver: false,
+      isAssistant: true,
+      badgeColor: palette[byName.size % palette.length]
+    });
+  });
+  const migrated = sanitizeRoles(Array.from(byName.values()));
+  return migrated.length ? migrated : defaultRoles();
+}
+
+function extraCareTagsFromChildren(baseTags) {
+  const tags = baseTags.slice();
+  const known = new Set(tags.map((tag) => tag.name));
+  const palette = ['#0ea5e9', '#64748b', '#16a34a', '#db2777'];
+  const found = [];
+  (Array.isArray(children) ? children : []).forEach((child) => {
+    if (!child || typeof child !== 'object') return;
+    const source = Array.isArray(child.careTags) ? child.careTags : [];
+    source.forEach((item) => {
+      const name = typeof item === 'string' ? item.trim() : '';
+      if (name) found.push(name);
+    });
+    if (child.motionSick) found.push('車酔い配慮');
+  });
+  found.forEach((name) => {
+    if (known.has(name)) return;
+    known.add(name);
+    const color = palette[(tags.length) % palette.length];
+    tags.push({
+      id: `tag_custom_${tags.length + 1}`,
+      name: name,
+      color: color,
+      textColor: textColorForHex(color),
+      requiredFeature: '',
+      preventCoOccurrence: false,
+      requireAssistant: false,
+      requireFrontSeat: name.indexOf('酔') !== -1,
+      requireAssistantRole: ''
+    });
+  });
+  return sanitizeCareTags(tags);
+}
+
+function loadRoleMaster() {
+  const stored = sanitizeRoles(readJsonStorage(STORAGE_KEYS.ROLES));
+  staffRoles = stored.length ? stored : migrateLegacyRoleLists();
+  if (!stored.length) writeJsonStorage(STORAGE_KEYS.ROLES, staffRoles);
+  return staffRoles;
+}
+
+function loadCareTagMaster() {
+  const raw = readJsonStorage(STORAGE_KEYS.CARE_TAGS);
+  if (Array.isArray(raw)) {
+    careTagMaster = sanitizeCareTags(raw);
+    careTagMasterReady = true;
+    return careTagMaster;
+  }
+  careTagMaster = extraCareTagsFromChildren(defaultCareTags());
+  careTagMasterReady = true;
+  writeJsonStorage(STORAGE_KEYS.CARE_TAGS, careTagMaster);
+  return careTagMaster;
+}
+
+function getRoles() {
+  if (!staffRoles.length) return defaultRoles();
+  return staffRoles.map((role) => ({
+    id: role.id,
+    name: role.name,
+    isDriver: !!role.isDriver,
+    isAssistant: !!role.isAssistant,
+    badgeColor: role.badgeColor
+  }));
+}
+
+function saveRoles(list) {
+  const next = sanitizeRoles(list);
+  staffRoles = next.length ? next : defaultRoles();
+  writeJsonStorage(STORAGE_KEYS.ROLES, staffRoles);
+  const driverNames = staffRoles.filter((role) => role.isDriver).map((role) => role.name);
+  const assistantNames = staffRoles.filter((role) => role.isAssistant).map((role) => role.name);
+  writeRoleList(DRIVER_ROLES_KEY, driverNames.length ? driverNames : LEGACY_DEFAULT_DRIVER_ROLES);
+  writeRoleList(COMPANION_ROLES_KEY, assistantNames.length ? assistantNames : LEGACY_DEFAULT_COMPANION_ROLES);
+  return getRoles();
+}
+
+function getCareTags() {
+  if (!careTagMasterReady) return defaultCareTags();
+  return careTagMaster.map((tag) => ({
+    id: tag.id,
+    name: tag.name,
+    color: tag.color,
+    textColor: tag.textColor,
+    requiredFeature: tag.requiredFeature || '',
+    preventCoOccurrence: !!tag.preventCoOccurrence,
+    requireAssistant: !!tag.requireAssistant,
+    requireFrontSeat: !!tag.requireFrontSeat,
+    requireAssistantRole: tag.requireAssistantRole || ''
+  }));
+}
+
+function saveCareTags(list) {
+  careTagMaster = sanitizeCareTags(list);
+  careTagMasterReady = true;
+  writeJsonStorage(STORAGE_KEYS.CARE_TAGS, careTagMaster);
+  return getCareTags();
+}
+
 function getDriverRoles() {
-  return readRoleList(DRIVER_ROLES_KEY, DEFAULT_DRIVER_ROLES);
+  const names = getRoles().filter((role) => role.isDriver).map((role) => role.name);
+  return names.length ? names : defaultRoles().filter((role) => role.isDriver).map((role) => role.name);
 }
 
 function saveDriverRoles(list) {
-  return writeRoleList(DRIVER_ROLES_KEY, list);
+  const names = sanitizeRoleList(list) || [];
+  const current = getRoles();
+  const kept = current.filter((role) => !role.isDriver || names.indexOf(role.name) !== -1);
+  names.forEach((name) => {
+    const found = kept.find((role) => role.name === name);
+    if (found) found.isDriver = true;
+    else {
+      kept.push({
+        id: `role_custom_${Date.now()}_${kept.length}`,
+        name: name,
+        isDriver: true,
+        isAssistant: false,
+        badgeColor: '#2563eb'
+      });
+    }
+  });
+  return saveRoles(kept).filter((role) => role.isDriver).map((role) => role.name);
 }
 
 function getCompanionRoles() {
-  return readRoleList(COMPANION_ROLES_KEY, DEFAULT_COMPANION_ROLES);
+  const names = getRoles().filter((role) => role.isAssistant).map((role) => role.name);
+  return names.length ? names : ['看護師（医療ケア）'];
 }
 
 function saveCompanionRoles(list) {
-  return writeRoleList(COMPANION_ROLES_KEY, list);
+  const names = sanitizeRoleList(list) || [];
+  const current = getRoles();
+  const kept = current.filter((role) => !role.isAssistant || names.indexOf(role.name) !== -1);
+  names.forEach((name) => {
+    const found = kept.find((role) => role.name === name);
+    if (found) found.isAssistant = true;
+    else {
+      kept.push({
+        id: `role_custom_${Date.now()}_${kept.length}`,
+        name: name,
+        isDriver: false,
+        isAssistant: true,
+        badgeColor: '#dc2626'
+      });
+    }
+  });
+  return saveRoles(kept).filter((role) => role.isAssistant).map((role) => role.name);
 }
 
 function resetRoleLabels() {
-  saveDriverRoles(DEFAULT_DRIVER_ROLES);
-  saveCompanionRoles(DEFAULT_COMPANION_ROLES);
+  saveRoles(defaultRoles());
+  saveCareTags(defaultCareTags());
+  return getRoles();
+}
+
+function defaultDriverName() {
+  const drivers = staffRoles.filter((role) => role.isDriver);
+  if (drivers.length) return drivers[0].name;
+  return '運転手（職員）';
 }
 
 function normalizeDriverRole(value) {
   const role = typeof value === 'string' ? value.trim() : '';
-  if (!role || LEGACY_FAMILY_ROLES.has(role)) return 'ドライバー';
+  if (!role || LEGACY_FAMILY_ROLES.has(role)) return defaultDriverName();
+  if (role === 'ドライバー' && !staffRoles.some((item) => item.name === 'ドライバー' || item.id === role)) {
+    return defaultDriverName();
+  }
   return role.slice(0, ROLE_LABEL_MAX);
+}
+
+function normalizeVehicleFeatures(car) {
+  const seen = new Set();
+  const out = [];
+  const push = (value) => {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    out.push(text.slice(0, 40));
+  };
+  if (car && Array.isArray(car.features)) car.features.forEach(push);
+  const special = !!(car && (car.isSpecialVehicle || car.isEquipmentCar));
+  if (special) push('リフト');
+  return out;
 }
 
 function normalizeCar(car) {
@@ -107,14 +502,20 @@ function normalizeCar(car) {
     }
   }
 
+  const special = !!(car.isSpecialVehicle || car.isEquipmentCar);
+  const parsedDays = coerceDayList(car.operatingDays);
   return {
     id: car.id,
     name: typeof car.name === 'string' ? car.name : '',
     capacity: Math.max(0, parseInt(car.capacity, 10) || 0),
     active: !!car.active,
     companions: companions,
-    isEquipmentCar: !!car.isEquipmentCar,
-    driverRole: normalizeDriverRole(car.driverRole),
+    isEquipmentCar: special,
+    isSpecialVehicle: special,
+    features: normalizeVehicleFeatures(Object.assign({}, car, { isEquipmentCar: special, isSpecialVehicle: special })),
+    driverRole: normalizeDriverRole(car.driverRole != null ? car.driverRole : car.driver),
+    assistantRole: typeof car.assistantRole === 'string' ? car.assistantRole.trim().slice(0, ROLE_LABEL_MAX) : '',
+    operatingDays: parsedDays == null ? ALL_DAY_KEYS.slice() : parsedDays,
     dispatchHistory: normalizeDispatchHistory(car.dispatchHistory)
   };
 }
@@ -128,6 +529,155 @@ function localDateString(date) {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** 配列なら曜日キーへ正規化（空配列は「定期なし」として維持）。未設定は null。 */
+function coerceDayList(value) {
+  if (!Array.isArray(value)) return null;
+  const allowed = new Set(ALL_DAY_KEYS);
+  const seen = new Set();
+  const out = [];
+  value.forEach((item) => {
+    const key = typeof item === 'string' ? item.trim().toLowerCase() : '';
+    if (!allowed.has(key) || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  });
+  return out;
+}
+
+function getDayOfWeekKey(targetDateStr) {
+  const ymd = normalizeDispatchDate(targetDateStr) || localDateString();
+  const [y, m, d] = ymd.split('-').map(Number);
+  return JS_DAY_TO_KEY[new Date(y, m - 1, d).getDay()];
+}
+
+/** 選択中の週のまま、指定曜日の日付（YYYY-MM-DD）へ移動する。週の開始は月曜。 */
+function dateForWeekday(baseDateStr, dayKey) {
+  const ymd = normalizeDispatchDate(baseDateStr) || localDateString();
+  const order = ALL_DAY_KEYS;
+  const from = order.indexOf(getDayOfWeekKey(ymd));
+  const to = order.indexOf(dayKey);
+  if (from < 0 || to < 0) return ymd;
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + (to - from));
+  return localDateString(dt);
+}
+
+let dailyOverrides = {};
+
+function emptyDailyOverride(dateStr) {
+  return {
+    date: dateStr,
+    absentPassengerIds: [],
+    spotPassengerIds: [],
+    outOfServiceVehicleIds: []
+  };
+}
+
+function sanitizeIdList(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  value.forEach((item) => {
+    if (item == null) return;
+    const id = String(item).trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  });
+  return out;
+}
+
+function sanitizeDailyOverride(dateStr, value) {
+  const src = value && typeof value === 'object' ? value : {};
+  return {
+    date: dateStr,
+    absentPassengerIds: sanitizeIdList(src.absentPassengerIds),
+    spotPassengerIds: sanitizeIdList(src.spotPassengerIds),
+    outOfServiceVehicleIds: sanitizeIdList(src.outOfServiceVehicleIds)
+  };
+}
+
+function loadDailyOverrides() {
+  dailyOverrides = {};
+  const raw = readJsonStorage(STORAGE_KEYS.DAILY_OVERRIDE);
+  if (!raw || typeof raw !== 'object') return;
+  const entries = Array.isArray(raw)
+    ? raw
+    : (typeof raw.date === 'string' && (raw.absentPassengerIds || raw.spotPassengerIds || raw.outOfServiceVehicleIds)
+      ? [raw]
+      : Object.keys(raw).map((key) => Object.assign({ date: key }, raw[key])));
+  entries.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const date = normalizeDispatchDate(item.date);
+    if (!date) return;
+    const next = sanitizeDailyOverride(date, item);
+    if (!next.absentPassengerIds.length && !next.spotPassengerIds.length && !next.outOfServiceVehicleIds.length) return;
+    dailyOverrides[date] = next;
+  });
+}
+
+function getDailyOverride(dateStr) {
+  const date = normalizeDispatchDate(dateStr) || localDateString();
+  const found = dailyOverrides[date];
+  if (!found) return emptyDailyOverride(date);
+  return {
+    date: date,
+    absentPassengerIds: found.absentPassengerIds.slice(),
+    spotPassengerIds: found.spotPassengerIds.slice(),
+    outOfServiceVehicleIds: found.outOfServiceVehicleIds.slice()
+  };
+}
+
+function saveDailyOverride(dateStr, overrideData) {
+  const date = normalizeDispatchDate(dateStr) || localDateString();
+  const next = sanitizeDailyOverride(date, overrideData);
+  const empty = !next.absentPassengerIds.length && !next.spotPassengerIds.length && !next.outOfServiceVehicleIds.length;
+  if (empty) delete dailyOverrides[date];
+  else dailyOverrides[date] = next;
+  writeJsonStorage(STORAGE_KEYS.DAILY_OVERRIDE, dailyOverrides);
+  return getDailyOverride(date);
+}
+
+function idSet(list) {
+  return new Set((Array.isArray(list) ? list : []).map((item) => String(item)));
+}
+
+/**
+ * 指定日の配車対象。曜日契約と当日オーバーライドだけを見る。
+ * 欠席・スポット・運休はマスタの schedulePattern / operatingDays を書き換えない。
+ */
+function getActiveEntitiesForDate(targetDateStr) {
+  const date = normalizeDispatchDate(targetDateStr) || localDateString();
+  const dayOfWeek = getDayOfWeekKey(date);
+  let override = emptyDailyOverride(date);
+  try {
+    override = getDailyOverride(date);
+  } catch (e) { /* 壊れた上書きは無視してマスタ側だけ使う */ }
+  const absent = idSet(override.absentPassengerIds);
+  const spot = idSet(override.spotPassengerIds);
+  const stopped = idSet(override.outOfServiceVehicleIds);
+
+  const activeVehicles = (Array.isArray(cars) ? cars : []).filter((vehicle) => {
+    if (!vehicle) return false;
+    if (stopped.has(String(vehicle.id))) return false;
+    if (vehicle.active === false) return false;
+    const days = vehicle.operatingDays;
+    if (!Array.isArray(days)) return true;
+    return days.includes(dayOfWeek);
+  });
+
+  const activePassengers = (Array.isArray(children) ? children : []).filter((passenger) => {
+    if (!passenger || passenger.isActive === false) return false;
+    const id = String(passenger.id);
+    if (absent.has(id)) return false;
+    if (spot.has(id)) return true;
+    return Array.isArray(passenger.schedulePattern) && passenger.schedulePattern.includes(dayOfWeek);
+  });
+
+  return { activePassengers, activeVehicles, date, dayOfWeek };
 }
 
 function normalizeDispatchDate(entry) {
@@ -221,12 +771,12 @@ function familySeatsOf(car) {
 
 function createDefaultChildren() {
   return [
-    { id: 1, name: 'ゆうと', groupClass: '小学部', grade: '小学部', careTags: ['見守り'], pos: '', parentCar: '1号車', fixedVehicle: '1号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 2, name: 'そうた', groupClass: '小学部', grade: '小学部', careTags: [], pos: '', parentCar: '2号車', fixedVehicle: '2号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 3, name: 'れん', groupClass: 'A組', grade: 'A組', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 4, name: 'はると', groupClass: 'A組', grade: 'A組', careTags: ['車椅子'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 5, name: 'こうき', groupClass: 'デイ', grade: 'デイ', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 6, name: '大和', groupClass: 'デイ', grade: 'デイ', careTags: ['見守り'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} }
+    { id: 1, name: 'ゆうと', groupClass: '小学部', grade: '小学部', careTags: ['見守り'], pos: '', parentCar: '1号車', fixedVehicle: '1号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市綾羅木町1-1', lat: 33.968, lng: 130.95, boardingTimeMinutes: null },
+    { id: 2, name: 'そうた', groupClass: '小学部', grade: '小学部', careTags: [], pos: '', parentCar: '2号車', fixedVehicle: '2号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市安岡町2-2', lat: 33.95, lng: 130.958, boardingTimeMinutes: null },
+    { id: 3, name: 'れん', groupClass: 'A組', grade: 'A組', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市椋野町3-3', lat: 33.9665, lng: 130.928, boardingTimeMinutes: null },
+    { id: 4, name: 'はると', groupClass: 'A組', grade: 'A組', careTags: ['車椅子'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市吉見町4-4', lat: 33.9495, lng: 130.9305, boardingTimeMinutes: null },
+    { id: 5, name: 'こうき', groupClass: 'デイ', grade: 'デイ', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市秋根町5-5', lat: 33.961, lng: 130.9625, boardingTimeMinutes: null },
+    { id: 6, name: '大和', groupClass: 'デイ', grade: 'デイ', careTags: ['見守り'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市富任町6-6', lat: 33.946, lng: 130.9485, boardingTimeMinutes: null }
   ];
 }
 
@@ -249,6 +799,7 @@ function normalizeChildCompanions(child) {
 function normalizeChild(child) {
   const meetOnSite = !!child.meetOnSite;
   const companions = meetOnSite ? [] : normalizeChildCompanions(child);
+  const parsedDays = coerceDayList(child.schedulePattern);
   return {
     ...child,
     active: !!child.active,
@@ -258,8 +809,83 @@ function normalizeChild(child) {
     parentCar: typeof child.parentCar === 'string' ? child.parentCar : '',
     fixedCar: typeof child.fixedCar === 'string' ? child.fixedCar : '',
     lastCar: typeof child.lastCar === 'string' ? child.lastCar : '',
-    rideHistory: child.rideHistory && typeof child.rideHistory === 'object' && !Array.isArray(child.rideHistory) ? child.rideHistory : {}
+    rideHistory: child.rideHistory && typeof child.rideHistory === 'object' && !Array.isArray(child.rideHistory) ? child.rideHistory : {},
+    schedulePattern: parsedDays == null ? ALL_DAY_KEYS.slice() : parsedDays,
+    isActive: child.isActive === false ? false : true,
+    address: typeof child.address === 'string' ? child.address.trim().slice(0, 120) : '',
+    lat: normalizeCoord(child.lat, -90, 90),
+    lng: normalizeCoord(child.lng, -180, 180),
+    boardingTimeMinutes: normalizeBoardingMinutes(child.boardingTimeMinutes)
   };
+}
+
+function normalizeCoord(value, min, max) {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return Math.round(n * 1e6) / 1e6;
+}
+
+function normalizeBoardingMinutes(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 180) return null;
+  return Math.round(n);
+}
+
+function normalizeClock(value) {
+  if (typeof value !== 'string') return '';
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return '';
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return '';
+  return `${String(hours).padStart(2, '0')}:${match[2]}`;
+}
+
+let facility = {
+  name: DEFAULT_FACILITY.name,
+  lat: DEFAULT_FACILITY.lat,
+  lng: DEFAULT_FACILITY.lng,
+  defaultDepartureTime: DEFAULT_FACILITY.defaultDepartureTime
+};
+
+function loadFacility() {
+  const raw = readJsonStorage(STORAGE_KEYS.FACILITY);
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const name = typeof src.name === 'string' ? src.name.trim().slice(0, 40) : '';
+  const lat = normalizeCoord(src.lat, -90, 90);
+  const lng = normalizeCoord(src.lng, -180, 180);
+  facility = {
+    name: name || DEFAULT_FACILITY.name,
+    lat: lat == null ? DEFAULT_FACILITY.lat : lat,
+    lng: lng == null ? DEFAULT_FACILITY.lng : lng,
+    defaultDepartureTime: normalizeClock(src.defaultDepartureTime) || DEFAULT_FACILITY.defaultDepartureTime
+  };
+}
+
+function getFacility() {
+  return {
+    name: facility.name,
+    lat: facility.lat,
+    lng: facility.lng,
+    defaultDepartureTime: facility.defaultDepartureTime
+  };
+}
+
+function saveFacility(partial) {
+  const src = partial && typeof partial === 'object' ? partial : {};
+  const name = typeof src.name === 'string' ? src.name.trim().slice(0, 40) : '';
+  const lat = Object.prototype.hasOwnProperty.call(src, 'lat') ? normalizeCoord(src.lat, -90, 90) : facility.lat;
+  const lng = Object.prototype.hasOwnProperty.call(src, 'lng') ? normalizeCoord(src.lng, -180, 180) : facility.lng;
+  facility = {
+    name: name || facility.name,
+    lat: lat == null ? facility.lat : lat,
+    lng: lng == null ? facility.lng : lng,
+    defaultDepartureTime: normalizeClock(src.defaultDepartureTime) || facility.defaultDepartureTime
+  };
+  writeJsonStorage(STORAGE_KEYS.FACILITY, facility);
+  return getFacility();
 }
 
 function childCompanionsOf(child) {
@@ -425,10 +1051,16 @@ let children = [];
 
 function loadData() {
   try {
+    loadRoleMaster();
+  } catch (e) {
+    staffRoles = defaultRoles();
+  }
+
+  try {
     const loadedCars = JSON.parse(localStorage.getItem('cp_cars')) || createDefaultCars();
     cars = loadedCars.map(normalizeCar);
   } catch (e) {
-    cars = createDefaultCars();
+    cars = createDefaultCars().map(normalizeCar);
   }
 
   try {
@@ -455,6 +1087,30 @@ function loadData() {
     try {
       localStorage.setItem('cp_children', JSON.stringify(children));
     } catch (e) { /* ignore */ }
+  }
+
+  try {
+    loadCareTagMaster();
+  } catch (e) {
+    careTagMaster = defaultCareTags();
+    careTagMasterReady = true;
+  }
+
+  try {
+    loadDailyOverrides();
+  } catch (e) {
+    dailyOverrides = {};
+  }
+
+  try {
+    loadFacility();
+  } catch (e) {
+    facility = {
+      name: DEFAULT_FACILITY.name,
+      lat: DEFAULT_FACILITY.lat,
+      lng: DEFAULT_FACILITY.lng,
+      defaultDepartureTime: DEFAULT_FACILITY.defaultDepartureTime
+    };
   }
 }
 
@@ -502,16 +1158,23 @@ function resetTodaySession() {
   cars.forEach(c => {
     c.active = true;
     c.companions = [];
-    c.isEquipmentCar = false; // 道具車は週ごとに変わるため毎回クリア
+    c.isEquipmentCar = false;
+    c.isSpecialVehicle = false;
+    c.features = Array.isArray(c.features) ? c.features.filter((feature) => feature !== 'リフト') : [];
+    c.assistantRole = '';
   });
 
   children.forEach(c => {
-    // 既存の初期状態に合わせ、全員「乗車」に戻す（マスタ情報は触らない）
+    // 既存の初期状態に合わせ、全員「乗車」に戻す（曜日契約は触らない）
     c.active = true;
     c.meetOnSite = false;
     c.companions = [];
     c.fixedCar = '';
   });
+
+  if (typeof getSelectedServiceDate === 'function') {
+    saveDailyOverride(getSelectedServiceDate(), emptyDailyOverride(getSelectedServiceDate()));
+  }
 
   if (typeof openChildCompanionEditors !== 'undefined' && openChildCompanionEditors.clear) {
     openChildCompanionEditors.clear();
@@ -556,10 +1219,14 @@ function isBackupChild(child) {
 
 function buildBackupPayload() {
   return {
-    version: 1,
+    version: 4,
     exportedAt: new Date().toISOString(),
     cars: cars,
-    children: children
+    children: children,
+    roles: getRoles(),
+    careTags: getCareTags(),
+    dailyOverrides: dailyOverrides,
+    facility: getFacility()
   };
 }
 
@@ -696,6 +1363,27 @@ function restoreBackupData(text) {
 
   cars = data.cars.map(normalizeCar);
   children = data.children.map(normalizeChild);
+  if (Array.isArray(data.roles)) {
+    const restoredRoles = sanitizeRoles(data.roles);
+    if (restoredRoles.length) staffRoles = restoredRoles;
+  }
+  if (Array.isArray(data.careTags)) {
+    careTagMaster = sanitizeCareTags(data.careTags);
+  } else {
+    careTagMaster = extraCareTagsFromChildren(careTagMasterReady && careTagMaster.length ? careTagMaster : defaultCareTags());
+  }
+  careTagMasterReady = true;
+  writeJsonStorage(STORAGE_KEYS.ROLES, staffRoles);
+  writeJsonStorage(STORAGE_KEYS.CARE_TAGS, careTagMaster);
+  if (data.dailyOverrides && typeof data.dailyOverrides === 'object') {
+    writeJsonStorage(STORAGE_KEYS.DAILY_OVERRIDE, data.dailyOverrides);
+    try {
+      loadDailyOverrides();
+    } catch (e) {
+      dailyOverrides = {};
+    }
+  }
+  if (data.facility && typeof data.facility === 'object') saveFacility(data.facility);
   saveData();
   renderCars();
   renderChildren();
@@ -764,6 +1452,21 @@ function promoteAllGrades() {
     getCompanionRoles,
     saveCompanionRoles,
     resetRoleLabels,
+    getRoles,
+    saveRoles,
+    getCareTags,
+    saveCareTags,
+    getDailyOverride,
+    saveDailyOverride,
+    getActiveEntitiesForDate,
+    getDayOfWeekKey,
+    dateForWeekday,
+    getFacility,
+    saveFacility,
+    normalizeClock,
+    WEEKDAY_KEYS,
+    ALL_DAY_KEYS,
+    STORAGE_KEYS,
     localDateString,
     normalizeChild,
     normalizeCompanion,
@@ -828,7 +1531,24 @@ function promoteAllGrades() {
   global.getCompanionRoles = getCompanionRoles;
   global.saveCompanionRoles = saveCompanionRoles;
   global.resetRoleLabels = resetRoleLabels;
+  global.getRoles = getRoles;
+  global.saveRoles = saveRoles;
+  global.getCareTags = getCareTags;
+  global.saveCareTags = saveCareTags;
+  global.getDailyOverride = getDailyOverride;
+  global.saveDailyOverride = saveDailyOverride;
+  global.getActiveEntitiesForDate = getActiveEntitiesForDate;
+  global.getDayOfWeekKey = getDayOfWeekKey;
+  global.dateForWeekday = dateForWeekday;
+  global.getFacility = getFacility;
+  global.saveFacility = saveFacility;
+  global.normalizeClock = normalizeClock;
+  global.normalizeCoord = normalizeCoord;
+  global.WEEKDAY_KEYS = WEEKDAY_KEYS;
+  global.ALL_DAY_KEYS = ALL_DAY_KEYS;
+  global.STORAGE_KEYS = STORAGE_KEYS;
   global.localDateString = localDateString;
+  global.normalizeDispatchDate = normalizeDispatchDate;
   global.normalizeChild = normalizeChild;
   global.normalizeCompanion = normalizeCompanion;
   global.normalizeChildCompanions = normalizeChildCompanions;

@@ -414,6 +414,98 @@ function medianCapacity(activeCars) {
   return (caps[mid - 1] + caps[mid]) / 2;
 }
 
+let activeCareTagMasterMap = null;
+
+function buildCareTagMasterMap(list) {
+  const map = new Map();
+  let source = list;
+  if (!Array.isArray(source) && typeof getCareTags === 'function') {
+    try {
+      source = getCareTags();
+    } catch (e) {
+      source = [];
+    }
+  }
+  if (!Array.isArray(source)) source = [];
+  source.forEach((tag) => {
+    if (!tag || typeof tag !== 'object') return;
+    if (tag.id) map.set(String(tag.id), tag);
+    if (tag.name) map.set(String(tag.name), tag);
+  });
+  return map;
+}
+
+function passengerPenaltyTagKeys(passenger) {
+  if (!passenger || typeof passenger !== 'object') return [];
+  const source = Array.isArray(passenger.careTags)
+    ? passenger.careTags
+    : (Array.isArray(passenger.positions) ? passenger.positions : []);
+  const keys = source.map((tag) => String(tag || '').trim()).filter(Boolean);
+  const hasSickness = keys.some((tag) => tag === 'tag_sickness' || tag.indexOf('酔') !== -1);
+  if (passenger.motionSick && !hasSickness) keys.push('車酔い配慮');
+  return keys;
+}
+
+function vehicleFeatureList(vehicle) {
+  const features = [];
+  if (vehicle && Array.isArray(vehicle.features)) {
+    vehicle.features.forEach((feature) => {
+      const text = String(feature || '').trim();
+      if (text && features.indexOf(text) === -1) features.push(text);
+    });
+  }
+  if (vehicle && (vehicle.isSpecialVehicle || vehicle.isEquipmentCar) && features.indexOf('リフト') === -1) {
+    features.push('リフト');
+  }
+  return features;
+}
+
+/**
+ * 要配慮タグマスタに基づく車両ペナルティ。
+ * 探索ループは変えず、スコアからこの値を引く。
+ */
+function calculateVehiclePenalty(vPlan, careTagMasterMap, context) {
+  const plan = vPlan || {};
+  const passengers = Array.isArray(plan.passengers) ? plan.passengers : [];
+  const vehicle = plan.vehicle || {};
+  const features = vehicleFeatureList(vehicle);
+  const map = careTagMasterMap instanceof Map ? careTagMasterMap : buildCareTagMasterMap(careTagMasterMap);
+  const tagCounts = {};
+  let penalty = 0;
+  const median = context && context.median != null ? context.median : null;
+  const cap = parseInt(vehicle.capacity, 10) || 0;
+
+  passengers.forEach((passenger) => {
+    const seen = new Set();
+    passengerPenaltyTagKeys(passenger).forEach((tagIdOrName) => {
+      const tagMeta = map.get(tagIdOrName);
+      if (!tagMeta || seen.has(tagMeta.id || tagMeta.name)) return;
+      seen.add(tagMeta.id || tagMeta.name);
+
+      if (tagMeta.preventCoOccurrence) {
+        const key = tagMeta.name || tagMeta.id;
+        tagCounts[key] = (tagCounts[key] || 0) + 1;
+        if (tagCounts[key] > 1) penalty += 20 * (tagCounts[key] - 1);
+      }
+      if (tagMeta.requiredFeature && features.indexOf(tagMeta.requiredFeature) === -1) {
+        penalty += 100;
+      }
+      if (tagMeta.requireFrontSeat && median != null && cap < median) {
+        penalty += 200;
+      }
+    });
+  });
+  return penalty;
+}
+
+function passengerHasFrontSeatTag(passenger, careTagMasterMap) {
+  const map = careTagMasterMap instanceof Map ? careTagMasterMap : buildCareTagMasterMap();
+  return passengerPenaltyTagKeys(passenger).some((key) => {
+    const tag = map.get(key);
+    return !!(tag && tag.requireFrontSeat);
+  });
+}
+
 /** 減点方式。高いほど良い。座席不足のハード失敗はここでは扱わない。 */
 function evaluateAssignmentScore(assignments) {
   const activeCars = assignmentCars(assignments);
@@ -425,6 +517,7 @@ function evaluateAssignmentScore(assignments) {
   const penalizeSolo = activeCars.length > 0 && totalRiders >= activeCars.length * 2;
   const median = medianCapacity(activeCars);
   const averages = [];
+  const careTagMasterMap = activeCareTagMasterMap || buildCareTagMasterMap();
 
   activeCars.forEach((car) => {
     const riders = assignments[car.name] || [];
@@ -435,10 +528,16 @@ function evaluateAssignmentScore(assignments) {
     const catchers = riders.filter(isCatcher).length;
     if (catchers >= 2) score -= 150 * catchers;
 
+    score -= calculateVehiclePenalty(
+      { vehicle: car, passengers: riders },
+      careTagMasterMap,
+      { median: median }
+    );
+
     const cap = parseInt(car.capacity, 10) || 0;
     if (cap < median) {
       riders.forEach((kid) => {
-        if (kid.motionSick) score -= 200;
+        if (kid.motionSick && !passengerHasFrontSeatTag(kid, careTagMasterMap)) score -= 200;
       });
     }
 
@@ -463,6 +562,13 @@ function canSwapSeats(carA, kidA, carB, kidB, assignments) {
   const usedA = companionSeatsOf(carA) + occupiedSeats(assignments[carA.name]);
   const usedB = companionSeatsOf(carB) + occupiedSeats(assignments[carB.name]);
   return usedA + delta <= capA && usedB - delta <= capB;
+}
+
+function optimizeDispatch(assignments, activeCars, options) {
+  const careTags = options && Array.isArray(options.careTags) ? options.careTags : null;
+  activeCareTagMasterMap = buildCareTagMasterMap(careTags);
+  optimizeBySwaps(assignments, activeCars);
+  return assignments;
 }
 
 function optimizeBySwaps(assignments, activeCars) {
@@ -598,26 +704,58 @@ function isSpecialPlanVehicle(car) {
 function collectSoftWarnings(assignments, activeCars) {
   const warnings = [];
   const median = medianCapacity(activeCars);
+  const map = activeCareTagMasterMap || buildCareTagMasterMap();
   activeCars.forEach((car) => {
     const riders = assignments[car.name] || [];
     if (riders.length === 1) {
-      const soloNg = planCareTags(riders[0]).some((tag) => tag.indexOf('単独') !== -1);
+      const soloNg = passengerPenaltyTagKeys(riders[0]).some((key) => {
+        const meta = map.get(key);
+        if (meta && meta.requireAssistant) return true;
+        return String(key).indexOf('単独') !== -1;
+      });
       warnings.push(soloNg
         ? `注意: ${riders[0].name}は単独乗車NGですが、${car.name}が1名乗車です`
         : `注意: ${car.name}は利用者1名のみの乗車です`);
     }
-    const wheelchairs = riders.filter((kid) => planCareTags(kid).some((tag) => tag.indexOf('車椅') !== -1));
-    if (wheelchairs.length >= 2) {
-      warnings.push(`注意: ${car.name}に車椅子の利用者が複数います（${wheelchairs.map((kid) => kid.name).join('、')}）`);
-    }
+    const grouped = {};
+    riders.forEach((kid) => {
+      const seen = new Set();
+      passengerPenaltyTagKeys(kid).forEach((key) => {
+        const meta = map.get(key);
+        if (!meta || !meta.preventCoOccurrence || seen.has(meta.id || meta.name)) return;
+        seen.add(meta.id || meta.name);
+        const id = meta.id || meta.name;
+        if (!grouped[id]) grouped[id] = { name: meta.name || id, people: [] };
+        grouped[id].people.push(kid.name);
+      });
+    });
+    Object.keys(grouped).forEach((id) => {
+      const group = grouped[id];
+      if (group.people.length >= 2) {
+        warnings.push(`注意: ${car.name}に${group.name}の利用者が複数います（${group.people.join('、')}）`);
+      }
+    });
     const cap = parseInt(car.capacity, 10) || 0;
     if (cap < median) {
       riders.forEach((kid) => {
-        if (kid.motionSick || planCareTags(kid).some((tag) => tag.indexOf('酔') !== -1)) {
-          warnings.push(`注意: ${kid.name}は車酔い配慮の座席を優先できていません`);
-        }
+        const needsFront = passengerHasFrontSeatTag(kid, map)
+          || kid.motionSick
+          || planCareTags(kid).some((tag) => tag.indexOf('酔') !== -1);
+        if (needsFront) warnings.push(`注意: ${kid.name}は車酔い配慮の座席を優先できていません`);
       });
     }
+    const features = vehicleFeatureList(car);
+    riders.forEach((kid) => {
+      const seen = new Set();
+      passengerPenaltyTagKeys(kid).forEach((key) => {
+        const meta = map.get(key);
+        if (!meta || !meta.requiredFeature || seen.has(meta.id || meta.name)) return;
+        seen.add(meta.id || meta.name);
+        if (features.indexOf(meta.requiredFeature) === -1) {
+          warnings.push(`注意: ${kid.name}の${meta.name}には「${meta.requiredFeature}」対応の車両が必要です`);
+        }
+      });
+    });
   });
   return warnings;
 }
@@ -638,7 +776,10 @@ function attachAssignmentWarnings(assignments, warnings) {
  * フェーズ1で固定ピン・親車・最低2名の骨格を作り、フェーズ2でソフト制約をスワップする。
  * 席が物理的に足りないときだけ leftover を返す。
  */
-function buildTwoPhaseAssignment(activeCars, ridingKids) {
+function buildTwoPhaseAssignment(activeCars, ridingKids, options) {
+  if (!activeCareTagMasterMap || (options && options.careTags)) {
+    activeCareTagMasterMap = buildCareTagMasterMap(options && options.careTags);
+  }
   const assignments = {};
   activeCars.forEach((car) => { assignments[car.name] = []; });
 
@@ -700,17 +841,34 @@ function generateCarpool() {
   clearCarpoolDiagnosis();
   renderAssignmentWarnings([]);
 
-  const activeCars = cars.filter(c => c.active);
-  const ridingKids = children.filter(isRiding);
-  const onSiteKids = children.filter(isOnSite);
+  let poolCars = cars;
+  let poolKids = children;
+  try {
+    if (typeof getActiveEntitiesForDate === 'function') {
+      const dateStr = typeof getSelectedServiceDate === 'function' ? getSelectedServiceDate() : localDateString();
+      const picked = getActiveEntitiesForDate(dateStr);
+      if (picked && Array.isArray(picked.activeVehicles) && Array.isArray(picked.activePassengers)) {
+        const vehicleIds = new Set(picked.activeVehicles.map((vehicle) => String(vehicle.id)));
+        const passengerIds = new Set(picked.activePassengers.map((passenger) => String(passenger.id)));
+        poolCars = cars.filter((car) => vehicleIds.has(String(car.id)));
+        poolKids = children.filter((passenger) => passengerIds.has(String(passenger.id)));
+      }
+    }
+  } catch (e) { /* 抽出に失敗した日は従来どおり全件を対象にする */ }
+
+  const activeCars = poolCars.filter(c => c.active);
+  const ridingKids = poolKids.filter(isRiding);
+  const onSiteKids = poolKids.filter(isOnSite);
 
   if (ridingKids.length === 0 && onSiteKids.length === 0) {
-    alert("参加する子供（乗車または現地集合）を選んでください。");
+    alert('この曜日の乗車・現地集合がありません。欠席を戻すか、お休みの利用者をスポット参加にしてください。');
     return;
   }
 
   let assignments = {};
   const warnings = [];
+
+  activeCareTagMasterMap = buildCareTagMasterMap();
 
   if (ridingKids.length > 0) {
     if (activeCars.length === 0) {
@@ -854,6 +1012,8 @@ function copyResult() {
     set currentAssignments(v) { currentAssignments = v; },
     get assignmentWarnings() { return lastAssignmentWarnings.slice(); },
     evaluateAssignmentScore,
+    calculateVehiclePenalty,
+    optimizeDispatch,
     get lastSessionCommit() { return lastSessionCommit; }
   };
   global.HaishaCarpool = HaishaCarpool;

@@ -32,6 +32,15 @@ const CLICK_ACTIONS = new Set([
   'add-child-companion',
   'remove-child-companion',
   'toggle-role-master',
+  'switch-master-tab',
+  'add-role',
+  'delete-role',
+  'add-care-tag',
+  'delete-care-tag',
+  'toggle-care-pill',
+  'toggle-day-status',
+  'set-service-weekday',
+  'toggle-schedule-day',
   'add-driver-role',
   'remove-driver-role',
   'add-companion-role',
@@ -100,7 +109,7 @@ function runClickAction(target) {
       addChild();
       break;
     case 'generate':
-      generateCarpool();
+      runDispatchWithRoute();
       break;
     case 'copy-result':
       copyResult();
@@ -177,6 +186,33 @@ function runClickAction(target) {
       break;
     case 'toggle-role-master':
       toggleRoleMaster();
+      break;
+    case 'switch-master-tab':
+      switchMasterTab(target.dataset.tab || 'roles');
+      break;
+    case 'add-role':
+      addRoleFromInput();
+      break;
+    case 'delete-role':
+      deleteRole(target.dataset.roleId || '');
+      break;
+    case 'add-care-tag':
+      addCareTagFromInput();
+      break;
+    case 'delete-care-tag':
+      deleteCareTag(target.dataset.tagId || '');
+      break;
+    case 'toggle-care-pill':
+      toggleCarePill(target.dataset.scope || 'new', target.dataset.tagId || '');
+      break;
+    case 'toggle-day-status':
+      togglePassengerDayStatus(target.dataset.id || '');
+      break;
+    case 'set-service-weekday':
+      setServiceWeekday(target.dataset.day || '');
+      break;
+    case 'toggle-schedule-day':
+      toggleScheduleDay(target.dataset.scope || 'new', target.dataset.day || '');
       break;
     case 'add-driver-role':
       addDriverRoleFromInput();
@@ -317,6 +353,45 @@ function handleAppChange(event) {
     case 'set-car-driver':
       setCarDriverRole(target.dataset.carId || target.dataset.id, target.value);
       break;
+    case 'set-car-assistant':
+      setCarAssistantRole(target.dataset.carId || target.dataset.id, target.value);
+      break;
+    case 'rename-role':
+      renameRole(target.dataset.roleId || '', target.value);
+      break;
+    case 'edit-role-color':
+      editRoleColor(target.dataset.roleId || '', target.value);
+      break;
+    case 'toggle-role-driver':
+      toggleRoleFlag(target.dataset.roleId || '', 'isDriver', target.checked);
+      break;
+    case 'toggle-role-assistant':
+      toggleRoleFlag(target.dataset.roleId || '', 'isAssistant', target.checked);
+      break;
+    case 'rename-care-tag':
+      renameCareTag(target.dataset.tagId || '', target.value);
+      break;
+    case 'edit-care-tag-color':
+      editCareTagColor(target.dataset.tagId || '', target.value);
+      break;
+    case 'toggle-care-tag-disperse':
+      toggleCareTagDisperse(target.dataset.tagId || '', target.checked);
+      break;
+    case 'toggle-motion-sick':
+      syncMotionSickPills(target.dataset.scope || 'new', target.checked);
+      break;
+    case 'set-service-date':
+      setServiceDate(target.value);
+      break;
+    case 'set-departure-time':
+      setDepartureTime(target.value);
+      break;
+    case 'set-facility-name':
+      setFacilityName(target.value);
+      break;
+    case 'set-facility-coord':
+      setFacilityCoord(target.dataset.coord || '', target.value);
+      break;
     default:
       break;
   }
@@ -336,17 +411,17 @@ function initApp() {
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
 
-    const driverRoleInput = event.target.closest('#driverRoleInput');
-    if (driverRoleInput) {
+    const newRoleName = event.target.closest('#newRoleName');
+    if (newRoleName) {
       event.preventDefault();
-      addDriverRoleFromInput();
+      addRoleFromInput();
       return;
     }
 
-    const companionRoleInput = event.target.closest('#companionRoleInput');
-    if (companionRoleInput) {
+    const newCareTagName = event.target.closest('#newCareTagName');
+    if (newCareTagName) {
       event.preventDefault();
-      addCompanionRoleFromInput();
+      addCareTagFromInput();
       return;
     }
 
@@ -372,6 +447,9 @@ function initApp() {
 
   applySectionOpenState();
   applySettingsPanelState();
+  syncServiceDateBar();
+  renderSchedulePills('new', WEEKDAY_KEYS.slice());
+  syncFacilityInputs();
   // ソート状態を sessionStorage から復元（未エクスポート関数参照で init が落ちないよう HaishaUI 経由）
   HaishaUI.writeCarSortMode(HaishaUI.readCarSortMode());
   HaishaUI.writeChildSortMode(HaishaUI.readChildSortMode());
