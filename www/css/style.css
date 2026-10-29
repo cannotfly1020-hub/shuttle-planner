@@ -888,18 +888,18 @@ input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
-  padding: 0 14px;
+  min-height: 40px;
+  padding: 8px 12px;
   border-radius: 999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-  font-size: 14px;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 13px;
   font-weight: 800;
+  line-height: 1.2;
   text-decoration: none;
   touch-action: manipulation;
 }
-.route-map:active { background: #dbeafe; }
+.route-map:active { background: #1e40af; }
 .route-leg { color: #64748b; font-size: 11px; padding: 2px 0 2px 9.2em; }
 .route-dwell { color: #b45309; font-style: normal; font-weight: 800; }
 .route-address { color: #475569; font-size: 11px; padding-left: 9.2em; }

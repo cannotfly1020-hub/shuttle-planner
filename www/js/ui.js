@@ -2004,8 +2004,62 @@ function stripRouteSection(text) {
   return String(text || '').replace(/\n*【巡回時刻】[\s\S]*?(?=-----+\nよろしくお願いいたします。)/, '\n');
 }
 
+/** 座標があればそのピン、無ければ住所。どちらも無ければ空文字。APIキーは不要。 */
+function mapsDirectionUrl(point) {
+  if (!point) return '';
+  const lat = point.lat;
+  const lng = point.lng;
+  if (lat != null && lat !== '' && lng != null && lng !== '') {
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+      return `https://www.google.com/maps/dir/?api=1&destination=${latNum},${lngNum}`;
+    }
+  }
+  const address = String(point.address || '').trim();
+  if (!address) return '';
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+}
+
+function routeMapAnchor(point, label) {
+  const url = mapsDirectionUrl(point);
+  if (!url) return '';
+  return `<a class="route-map" href="${escapeRoleText(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(label)}">📍 地図</a>`;
+}
+
+function passengerMapPoint(schedule, stop) {
+  const riders = schedule && Array.isArray(schedule.route) ? schedule.route : [];
+  const found = riders.find((passenger) => passenger && String(passenger.id) === String(stop && stop.id));
+  return found || stop;
+}
+
+function routeTextWithMapLinks(schedules) {
+  let text = formatRouteScheduleText(schedules);
+  if (!text) return text;
+  let cursor = 0;
+  (Array.isArray(schedules) ? schedules : []).forEach((schedule) => {
+    (schedule.timeline || []).forEach((stop) => {
+      if (!stop || stop.type !== 'passenger') return;
+      const url = mapsDirectionUrl(passengerMapPoint(schedule, stop));
+      if (!url) return;
+      const marker = `[${stop.arrivalTime}着 - ${stop.departureTime}発] ${stop.name}`;
+      const idx = text.indexOf(marker, cursor);
+      if (idx < 0) return;
+      const lineEnd = text.indexOf('\n', idx);
+      const end = lineEnd < 0 ? text.length : lineEnd;
+      if (text.slice(idx, end).indexOf(url) >= 0) {
+        cursor = end;
+        return;
+      }
+      text = `${text.slice(0, end)} ${url}${text.slice(end)}`;
+      cursor = end + url.length + 1;
+    });
+  });
+  return text;
+}
+
 function mergeRouteIntoPlan(baseText, schedules) {
-  const block = formatRouteScheduleText(schedules);
+  const block = routeTextWithMapLinks(schedules);
   const closing = '---------------------\nよろしくお願いいたします。';
   const base = stripRouteSection(baseText);
   if (!block) return base;
@@ -2051,23 +2105,23 @@ function renderRouteTimeline(schedules) {
   }
   root.innerHTML = list.map((schedule) => {
     const vehicleName = escapeRoleText(schedule.vehicle && schedule.vehicle.name ? schedule.vehicle.name : '車両');
+    const facility = typeof getFacility === 'function' ? getFacility() : null;
     const stops = (schedule.timeline || []).map((stop) => {
       if (stop.type === 'depot_start') {
-        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span>出発: ${escapeRoleText(stop.name)}</span></div>`;
+        const mapLink = routeMapAnchor(facility, `${stop.name}への出発案内をGoogleマップで開く`);
+        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span class="route-stop-body">出発: ${escapeRoleText(stop.name)}</span>${mapLink}</div>`;
       }
       if (stop.type === 'passenger') {
         const tags = stop.careTags && stop.careTags.length ? ` [${escapeRoleText(stop.careTags.join('、'))}]` : '';
         const address = stop.address ? `<div class="route-address">${escapeRoleText(stop.address)}</div>` : '';
-        const mapUrl = stop.mapsUrl || (typeof mapsNavigationUrl === 'function' ? mapsNavigationUrl(stop) : '');
-        const mapLink = mapUrl
-          ? `<a class="route-map" href="${escapeRoleText(mapUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(stop.name)}の案内をGoogleマップで開く">📍 地図</a>`
-          : '';
+        const mapLink = routeMapAnchor(passengerMapPoint(schedule, stop), `${stop.name}の案内をGoogleマップで開く`);
         return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
           <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}着 - ${escapeRoleText(stop.departureTime)}発</span><span class="route-stop-body">${escapeRoleText(stop.name)}${tags} <em class="route-dwell">乗降${stop.dwellMinutes}分</em></span>${mapLink}</div>${address}`;
       }
       if (stop.type === 'depot_end') {
+        const mapLink = routeMapAnchor(facility, `${stop.name}への到着案内をGoogleマップで開く`);
         return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
-          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}</span><span>到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</span></div>`;
+          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}</span><span class="route-stop-body">到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</span>${mapLink}</div>`;
       }
       return '';
     }).join('');
