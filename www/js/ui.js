@@ -2417,7 +2417,7 @@ function mapsDirectionUrl(point) {
 function routeMapAnchor(point, label) {
   const url = mapsDirectionUrl(point);
   if (!url) return '';
-  return `<a class="route-map" href="${escapeRoleText(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(label)}">📍 地図</a>`;
+  return `<a class="route-map map-link-btn" href="${escapeRoleText(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(label)}">📍 地図</a>`;
 }
 
 function passengerMapPoint(schedule, stop) {
@@ -2488,9 +2488,63 @@ function buildCurrentRouteSchedules() {
   return schedules;
 }
 
+function formatPrintServiceDate(dateStr) {
+  const ymd = normalizeDispatchDate(dateStr) || localDateString();
+  const parts = ymd.split('-');
+  const labels = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土', sun: '日' };
+  const weekday = labels[getDayOfWeekKey(ymd)] || '';
+  return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日（${weekday}）`;
+}
+
+function syncPrintHeader() {
+  const dateEl = document.getElementById('printServiceDate');
+  const metaEl = document.getElementById('printCreatedMeta');
+  if (dateEl) dateEl.textContent = `運行日: ${formatPrintServiceDate(getSelectedServiceDate())}`;
+  if (!metaEl) return;
+  const facility = typeof getFacility === 'function' ? getFacility() : null;
+  const facilityName = facility && facility.name ? facility.name : '';
+  const now = new Date();
+  const stamp = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  metaEl.textContent = facilityName ? `${stamp} / ${facilityName}` : stamp;
+}
+
+function printDispatchSheet() {
+  syncPrintHeader();
+  window.print();
+}
+
+function vehiclePrintHeaderText(schedule) {
+  const vehicle = schedule && schedule.vehicle ? schedule.vehicle : {};
+  const name = escapeRoleText(vehicle.name || '車両');
+  const driver = escapeRoleText(vehicleDriverLabel(vehicle) || '未設定');
+  const assistant = vehicleAssistantLabel(vehicle);
+  const assist = assistant ? `　添乗: ${escapeRoleText(assistant)}` : '';
+  return `${name}　運転: ${driver}${assist}`;
+}
+
+function renderPrintTimelineTable(schedule) {
+  const rows = (schedule.timeline || []).map((stop) => {
+    if (!stop) return '';
+    if (stop.type === 'depot_start') {
+      return `<tr><td>${escapeRoleText(stop.departureTime)}発</td><td>出発: ${escapeRoleText(stop.name)}</td><td></td><td></td><td></td></tr>`;
+    }
+    if (stop.type === 'passenger') {
+      const tags = (stop.careTags || []).map((tag) => `<span class="care-tag-badge">${escapeRoleText(tag)}</span>`).join('');
+      const dwell = Number.isFinite(stop.dwellMinutes) ? `${stop.dwellMinutes}分` : '';
+      return `<tr><td>${escapeRoleText(stop.arrivalTime)}着 ${escapeRoleText(stop.departureTime)}発</td><td>${escapeRoleText(stop.name)}</td><td>${tags}</td><td>${dwell}</td><td>${escapeRoleText(stop.address || '')}</td></tr>`;
+    }
+    if (stop.type === 'depot_end') {
+      return `<tr><td>${escapeRoleText(stop.arrivalTime)}着</td><td>到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</td><td></td><td></td><td></td></tr>`;
+    }
+    return '';
+  }).join('');
+  return `<table class="print-timeline-table"><thead><tr><th>時刻</th><th>氏名</th><th>要配慮・特性</th><th>乗降時間</th><th>住所</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function renderRouteTimeline(schedules) {
   const root = document.getElementById('routeTimeline');
   if (!root) return;
+  syncPrintHeader();
   const list = Array.isArray(schedules) ? schedules : [];
   if (!list.length) {
     root.innerHTML = '';
@@ -2519,7 +2573,7 @@ function renderRouteTimeline(schedules) {
       return '';
     }).join('');
     const note = schedule.approximated ? '<p class="route-note">座標がない区間は登録順のまま、目安5分で積算しています。</p>' : '';
-    return `<section class="route-card"><h3>${vehicleName}の巡回</h3>${stops}${note}</section>`;
+    return `<section class="route-card vehicle-plan-card"><h3 class="route-screen">${vehicleName}の巡回</h3><div class="vehicle-card-header">${vehiclePrintHeaderText(schedule)}</div><div class="route-screen">${stops}</div>${renderPrintTimelineTable(schedule)}${note}</section>`;
   }).join('');
 }
 
@@ -2619,6 +2673,7 @@ function maybeShowTutorialOnLaunch() {
 
 bindCarReorderGestures();
 bindPlacePickerFields();
+window.addEventListener('beforeprint', syncPrintHeader);
 
 
   const HaishaUI = {
@@ -2698,6 +2753,7 @@ bindPlacePickerFields();
     toggleScheduleDay,
     togglePassengerDayStatus,
     runDispatchWithRoute,
+    printDispatchSheet,
     togglePlacePicker,
     searchPlace,
     setDepartureTime,

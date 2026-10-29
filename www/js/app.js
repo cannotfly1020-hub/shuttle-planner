@@ -13,6 +13,7 @@ const CLICK_ACTIONS = new Set([
   'add-child',
   'generate',
   'copy-result',
+  'print-plan',
   'reset-data',
   'copy-backup',
   'open-restore',
@@ -115,6 +116,9 @@ function runClickAction(target) {
       break;
     case 'copy-result':
       copyResult();
+      break;
+    case 'print-plan':
+      printDispatchSheet();
       break;
     case 'reset-data':
       resetAllData();

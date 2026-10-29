@@ -319,6 +319,8 @@ h1 {
 .btn-restore { background: #1e3a8a; color: white; margin-top: 8px; }
 .btn-restore:active { background: #1e40af; }
 .btn-success { background-color: #16a34a; color: white; margin-top: 8px; }
+.btn-print { background-color: #0f172a; color: #fff; margin-top: 8px; }
+.btn-print:active { background-color: #1e293b; }
 .btn-secondary { background-color: #475569; color: white; padding: 7px 10px; font-size: 12px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; touch-action: manipulation; }
 .btn-edit { background: #e0f2fe; color: #0284c7; border: none; border-radius: 6px; padding: 4px 7px; font-size: 11px; cursor: pointer; touch-action: manipulation; min-height: 32px; min-width: 32px; pointer-events: auto; }
 .btn-delete { background: #fee2e2; color: #dc2626; border: none; border-radius: 6px; padding: 4px 7px; font-size: 11px; cursor: pointer; touch-action: manipulation; min-height: 32px; min-width: 32px; pointer-events: auto; }
@@ -1277,4 +1279,153 @@ input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px
 .tutorial-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+@media print {
+  /* 1. ページ基本設定: A4横向き強制・余白最小化 */
+  @page {
+    size: A4 landscape;
+    margin: 8mm 10mm;
+  }
+
+  /* 2. 印刷不要なUI要素の完全非表示 */
+  header,
+  nav,
+  .quick-calendar,
+  .passenger-management-section,
+  .vehicle-settings-section,
+  .btn,
+  button,
+  .modal,
+  #pickerMap,
+  .map-link-btn,
+  .alert-warning-badge,
+  .no-print {
+    display: none !important;
+  }
+
+  /* 3. 背景・文字色の強制印刷（ブラウザ設定依存の解消） */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color: #1e293b !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    font-size: 9pt;
+    line-height: 1.3;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* 4. 印刷用ヘッダー（帳票タイトル）の表示 */
+  .print-header {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 2px solid #0f172a;
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+  }
+  .print-header h1 {
+    font-size: 16pt;
+    margin: 0;
+    font-weight: bold;
+    color: #0f172a !important;
+  }
+  .print-header .meta-info {
+    font-size: 9pt;
+    color: #475569 !important;
+    text-align: right;
+  }
+
+  /* 5. 車両別ブロックの横並び・改ページ制御 */
+  .plan-results-container {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important;
+    gap: 10px !important;
+    page-break-inside: avoid;
+  }
+
+  .vehicle-plan-card {
+    border: 1.5px solid #64748b !important;
+    border-radius: 4px !important;
+    padding: 6px !important;
+    background: #ffffff !important;
+    page-break-inside: avoid !important; /* カード途中でページが千切れるのを防止 */
+  }
+
+  .vehicle-card-header {
+    display: block !important;
+    background: #f1f5f9 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 4px 6px !important;
+    font-weight: bold;
+    font-size: 10.5pt;
+  }
+
+  /* 6. 巡回タイムライン・乗客一覧の帳票レイアウト */
+  .print-timeline-table {
+    display: table !important;
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    font-size: 8.5pt;
+  }
+
+  .print-timeline-table th,
+  .print-timeline-table td {
+    border: 1px solid #cbd5e1;
+    padding: 3px 5px;
+    text-align: left;
+  }
+
+  .print-timeline-table th {
+    background: #f8fafc !important;
+    font-weight: 600;
+  }
+
+  /* 配慮タグバッジの印刷最適化（白黒でも判別しやすい枠線付き） */
+  .care-tag-badge {
+    border: 1px solid #94a3b8 !important;
+    padding: 1px 4px !important;
+    font-size: 7.5pt !important;
+    border-radius: 2px !important;
+  }
+
+  /* 画面用タイムラインを隠し、帳票だけをページ幅いっぱいに出す */
+  .route-screen,
+  .main-grid,
+  .control-bar {
+    display: none !important;
+  }
+
+  html, body {
+    max-width: none !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .result-card {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  .route-note {
+    margin: 4px 0 0;
+    font-size: 8pt;
+  }
+}
+
+/* 画面表示時は印刷専用ヘッダーと帳票テーブルを隠す */
+.print-header,
+.vehicle-card-header,
+.print-timeline-table {
+  display: none;
 }

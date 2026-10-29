@@ -10,15 +10,15 @@
 <meta name="apple-mobile-web-app-title" content="送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029m">
+<link rel="stylesheet" href="css/style.css?v=20261029n">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
-<h1>shuttle-planner 送迎計画最適化</h1>
+<h1 class="no-print">shuttle-planner 送迎計画最適化</h1>
 
-<div class="service-date-bar" id="serviceDateBar">
+<div class="service-date-bar quick-calendar no-print" id="serviceDateBar">
   <label class="service-date-label">
     <span id="serviceDateCaption">本日</span>
     <input type="date" id="serviceDateInput" data-action="set-service-date" aria-label="運行日">
@@ -34,7 +34,7 @@
 </div>
 
 <!-- リアルタイム状況バー -->
-<div class="status-bar" id="statusBar">
+<div class="status-bar no-print" id="statusBar">
   <div class="status-item">
     <span class="status-label">利用者</span>
     <span class="status-val" id="countKids">0人</span>
@@ -56,7 +56,7 @@
 </div>
 
 <!-- クイック操作バー -->
-<div class="control-bar">
+<div class="control-bar no-print">
   <button type="button" class="control-btn control-btn-help" data-action="open-tutorial" title="使い方ガイドを開く">❓ 使い方</button>
   <button type="button" class="control-btn control-btn-reset" data-action="reset-today" title="出欠・同乗・指定のみ初期化（マスタは保持）">🔄 本日の運行をリセット</button>
   <button type="button" class="control-btn" data-action="manual-save">💾 今の状態を保存</button>
@@ -65,7 +65,7 @@
 <!-- 本日の車 ＋ 選手一覧（スマホ1カラム / 768px〜2カラム） -->
 <div class="main-grid">
 
-  <section class="panel is-open" id="carsPanel" data-section="cars">
+  <section class="panel is-open vehicle-settings-section" id="carsPanel" data-section="cars">
     <button type="button" class="panel-toggle" data-action="toggle-section" data-section="cars" aria-expanded="true">
       <div class="panel-toggle-main">
         <span class="panel-title">本日の送迎車両</span>
@@ -86,7 +86,7 @@
     </div>
   </section>
 
-  <section class="panel is-open" id="childrenPanel" data-section="children">
+  <section class="panel is-open passenger-management-section" id="childrenPanel" data-section="children">
     <button type="button" class="panel-toggle" data-action="toggle-section" data-section="children" aria-expanded="true">
       <div class="panel-toggle-main">
         <span class="panel-title">利用者一覧</span>
@@ -171,7 +171,7 @@
 </div>
 
 <!-- 配車設定・実行 -->
-<div class="card">
+<div class="card no-print">
   <h2 class="card-heading">送迎ルール・条件</h2>
   <div class="mode-select-box">
     <label class="mode-label">割り当ての優先モード:</label>
@@ -191,20 +191,28 @@
 </div>
 
 <!-- 配車失敗時の診断アドバイス -->
-<div class="diagnosis-card" id="carpoolDiagnosis" hidden></div>
+<div class="diagnosis-card no-print" id="carpoolDiagnosis" hidden></div>
 
 <!-- 結果表示 -->
 <div class="card result-card" id="resultCard">
-  <h2 class="card-heading">本日の送迎運行計画</h2>
-  <div id="resultWarnings" class="result-warnings" hidden></div>
-  <div class="result-box" id="resultText"></div>
-  <div id="routeTimeline" class="route-timeline"></div>
-  <button type="button" class="btn btn-outline" data-action="generate">🔄 別の組み合わせで再計算する</button>
+  <div class="print-header">
+    <h1>送迎運行指示書（本日の運行計画）</h1>
+    <div class="meta-info">
+      <div id="printServiceDate">運行日: </div>
+      <div id="printCreatedMeta"></div>
+    </div>
+  </div>
+  <h2 class="card-heading no-print">本日の送迎運行計画</h2>
+  <div id="resultWarnings" class="result-warnings no-print" hidden></div>
+  <div class="result-box no-print" id="resultText"></div>
+  <div id="routeTimeline" class="route-timeline plan-results-container"></div>
+  <button type="button" class="btn btn-outline no-print" data-action="generate">🔄 別の組み合わせで再計算する</button>
   <button type="button" class="btn btn-success" data-action="copy-result">📋 運行計画テキストをコピー</button>
+  <button type="button" class="btn btn-print" data-action="print-plan">🖨️ 送迎表を印刷（A4横）</button>
 </div>
 
 <!-- 設定・バックアップ（折りたたみ・初期は閉じる） -->
-<section class="panel panel-settings" id="settingsPanel">
+<section class="panel panel-settings no-print" id="settingsPanel">
   <button type="button" class="panel-toggle" data-action="toggle-settings" aria-expanded="false">
     <div class="panel-toggle-main">
       <span class="panel-title">設定・バックアップ</span>
@@ -270,7 +278,7 @@
 </section>
 
 <!-- 初回ガイド（オンボーディング） -->
-<div class="modal-overlay tutorial-overlay" id="tutorialModal" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+<div class="modal modal-overlay tutorial-overlay" id="tutorialModal" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
   <div class="modal-box tutorial-box">
     <button type="button" class="tutorial-close" data-action="close-tutorial" aria-label="閉じる">✕</button>
     <h3 id="tutorialTitle" class="tutorial-heading">使い方ガイド</h3>
@@ -315,7 +323,7 @@
 </div>
 
 <!-- バックアップ復元モーダル -->
-<div class="modal-overlay" id="restoreModal">
+<div class="modal modal-overlay" id="restoreModal">
   <div class="modal-box">
     <h3>データの復元</h3>
     <div class="modal-field">
@@ -330,7 +338,7 @@
 </div>
 
 <!-- 利用者情報 編集モーダル -->
-<div class="modal-overlay" id="editModal">
+<div class="modal modal-overlay" id="editModal">
   <div class="modal-box">
     <h3>利用者登録</h3>
     <input type="hidden" id="editChildId">
@@ -405,11 +413,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029m"></script>
-<script src="js/ui.js?v=20261029m"></script>
-<script src="js/carpool.js?v=20261029m"></script>
-<script src="js/route.js?v=20261029m"></script>
-<script src="js/app.js?v=20261029m"></script>
+<script src="js/data.js?v=20261029n"></script>
+<script src="js/ui.js?v=20261029n"></script>
+<script src="js/carpool.js?v=20261029n"></script>
+<script src="js/route.js?v=20261029n"></script>
+<script src="js/app.js?v=20261029n"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
