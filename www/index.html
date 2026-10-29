@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>shuttle-planner | 送迎計画・運行最適化</title>
+<title>スマート送迎 | 送迎計画・運行最適化</title>
 <meta name="theme-color" content="#1e3a8a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="shuttle-planner 送迎管理">
+<meta name="apple-mobile-web-app-title" content="スマート送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029q">
+<link rel="stylesheet" href="css/style.css?v=20261029r">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -18,8 +18,7 @@
 
 <header class="app-header no-print">
   <h1 id="headerAppTitle" class="app-title">
-    <span id="headerFacilityName">shuttle-planner</span>
-    <span class="app-subtitle">送迎管理</span>
+    <span id="headerFacilityName">スマート送迎</span>
   </h1>
 </header>
 
@@ -201,7 +200,7 @@
 <!-- 結果表示 -->
 <div class="card result-card" id="resultCard">
   <div class="print-header">
-    <h1 id="printPlanTitle">本日の送迎運行計画 - shuttle-planner</h1>
+    <h1 id="printPlanTitle">本日の送迎運行計画 - スマート送迎</h1>
     <div class="meta-info">
       <div id="printServiceDate">運行日: </div>
       <div id="printCreatedMeta"></div>
@@ -438,11 +437,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029q"></script>
-<script src="js/ui.js?v=20261029q"></script>
-<script src="js/carpool.js?v=20261029q"></script>
-<script src="js/route.js?v=20261029q"></script>
-<script src="js/app.js?v=20261029q"></script>
+<script src="js/data.js?v=20261029r"></script>
+<script src="js/ui.js?v=20261029r"></script>
+<script src="js/carpool.js?v=20261029r"></script>
+<script src="js/route.js?v=20261029r"></script>
+<script src="js/app.js?v=20261029r"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

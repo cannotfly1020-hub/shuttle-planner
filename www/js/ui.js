@@ -2604,7 +2604,7 @@ function saveFacilityPlace() {
     return;
   }
   const current = getFacility();
-  const name = dom.name && dom.name.value.trim() ? dom.name.value.trim().slice(0, 40) : current.name;
+  const name = dom.name ? dom.name.value.trim().slice(0, 40) : current.name;
   const address = dom.address ? dom.address.value.trim().slice(0, 120) : '';
   const time = normalizeClock(dom.time && dom.time.value ? dom.time.value : '') || current.defaultDepartureTime;
   saveFacility({
@@ -2748,11 +2748,22 @@ function formatPrintServiceDate(dateStr) {
   return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日（${weekday}）`;
 }
 
+const BRAND_FALLBACK = 'スマート送迎';
+
+function storedFacilityName() {
+  if (typeof getFacilityBrandName === 'function') return getFacilityBrandName();
+  if (typeof getFacility !== 'function') return '';
+  const facility = getFacility();
+  return facility && typeof facility.name === 'string' ? facility.name.trim() : '';
+}
+
 function facilityBrandToken() {
-  const name = typeof getFacilityBrandName === 'function'
-    ? getFacilityBrandName()
-    : (typeof getFacility === 'function' && getFacility().name ? String(getFacility().name).trim() : '');
-  return name || 'shuttle-planner';
+  return storedFacilityName() || BRAND_FALLBACK;
+}
+
+function headerBrandLabel() {
+  const name = storedFacilityName();
+  return name ? `${name} 送迎管理` : BRAND_FALLBACK;
 }
 
 function planTextHeader() {
@@ -2762,10 +2773,10 @@ function planTextHeader() {
 function updateHeaderBranding() {
   const token = facilityBrandToken();
   const nameEl = document.getElementById('headerFacilityName');
-  if (nameEl) nameEl.textContent = token;
+  if (nameEl) nameEl.textContent = headerBrandLabel();
   document.title = `${token} | 送迎計画・運行最適化`;
   const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-  if (apple) apple.setAttribute('content', `${token} 送迎管理`);
+  if (apple) apple.setAttribute('content', headerBrandLabel());
   const printTitle = document.getElementById('printPlanTitle');
   if (printTitle) printTitle.textContent = `本日の送迎運行計画 - ${token}`;
   if (routePlanBase) {

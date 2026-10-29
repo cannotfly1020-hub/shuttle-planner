@@ -865,11 +865,12 @@ function normalizeSystemName(value) {
 function loadFacility() {
   const raw = readJsonStorage(STORAGE_KEYS.FACILITY);
   const src = raw && typeof raw === 'object' ? raw : {};
-  const name = typeof src.name === 'string' ? src.name.trim().slice(0, 40) : '';
+  const hasName = Object.prototype.hasOwnProperty.call(src, 'name') && typeof src.name === 'string';
+  const name = hasName ? src.name.trim().slice(0, 40) : DEFAULT_FACILITY.name;
   const lat = normalizeCoord(src.lat, -90, 90);
   const lng = normalizeCoord(src.lng, -180, 180);
   facility = {
-    name: name || DEFAULT_FACILITY.name,
+    name,
     address: normalizeFacilityAddress(src.address),
     systemName: normalizeSystemName(src.systemName),
     lat: lat == null ? DEFAULT_FACILITY.lat : lat,
@@ -895,7 +896,9 @@ function getFacilityBrandName() {
 
 function saveFacility(partial) {
   const src = partial && typeof partial === 'object' ? partial : {};
-  const name = typeof src.name === 'string' ? src.name.trim().slice(0, 40) : '';
+  const name = Object.prototype.hasOwnProperty.call(src, 'name')
+    ? (typeof src.name === 'string' ? src.name.trim().slice(0, 40) : facility.name)
+    : facility.name;
   const lat = Object.prototype.hasOwnProperty.call(src, 'lat') ? normalizeCoord(src.lat, -90, 90) : facility.lat;
   const lng = Object.prototype.hasOwnProperty.call(src, 'lng') ? normalizeCoord(src.lng, -180, 180) : facility.lng;
   const address = Object.prototype.hasOwnProperty.call(src, 'address')
@@ -905,7 +908,7 @@ function saveFacility(partial) {
     ? normalizeSystemName(src.systemName)
     : (facility.systemName || '');
   facility = {
-    name: name || facility.name,
+    name,
     address,
     systemName,
     lat: lat == null ? facility.lat : lat,
