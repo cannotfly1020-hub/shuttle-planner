@@ -889,6 +889,10 @@ function getFacility() {
   };
 }
 
+function getFacilityBrandName() {
+  return facility && typeof facility.name === 'string' ? facility.name.trim() : '';
+}
+
 function saveFacility(partial) {
   const src = partial && typeof partial === 'object' ? partial : {};
   const name = typeof src.name === 'string' ? src.name.trim().slice(0, 40) : '';
@@ -1488,6 +1492,7 @@ function promoteAllGrades() {
     getDayOfWeekKey,
     dateForWeekday,
     getFacility,
+    getFacilityBrandName,
     saveFacility,
     normalizeClock,
     WEEKDAY_KEYS,
@@ -1567,6 +1572,7 @@ function promoteAllGrades() {
   global.getDayOfWeekKey = getDayOfWeekKey;
   global.dateForWeekday = dateForWeekday;
   global.getFacility = getFacility;
+  global.getFacilityBrandName = getFacilityBrandName;
   global.saveFacility = saveFacility;
   global.normalizeClock = normalizeClock;
   global.normalizeCoord = normalizeCoord;

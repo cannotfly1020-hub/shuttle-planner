@@ -10,14 +10,18 @@
 <meta name="apple-mobile-web-app-title" content="shuttle-planner 送迎管理">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029p">
+<link rel="stylesheet" href="css/style.css?v=20261029q">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
-<h1 class="app-title no-print">shuttle-planner 送迎管理</h1>
-<p class="app-subtitle no-print">福祉・通所介護・スクール向け送迎最適化</p>
+<header class="app-header no-print">
+  <h1 id="headerAppTitle" class="app-title">
+    <span id="headerFacilityName">shuttle-planner</span>
+    <span class="app-subtitle">送迎管理</span>
+  </h1>
+</header>
 
 <div class="service-date-bar quick-calendar no-print" id="serviceDateBar">
   <label class="service-date-label">
@@ -434,11 +438,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029p"></script>
-<script src="js/ui.js?v=20261029p"></script>
-<script src="js/carpool.js?v=20261029p"></script>
-<script src="js/route.js?v=20261029p"></script>
-<script src="js/app.js?v=20261029p"></script>
+<script src="js/data.js?v=20261029q"></script>
+<script src="js/ui.js?v=20261029q"></script>
+<script src="js/carpool.js?v=20261029q"></script>
+<script src="js/route.js?v=20261029q"></script>
+<script src="js/app.js?v=20261029q"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

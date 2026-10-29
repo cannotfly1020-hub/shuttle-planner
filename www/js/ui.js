@@ -2622,6 +2622,7 @@ function saveFacilityPlace() {
   }
   refreshRouteIfVisible();
   syncPrintHeader();
+  updateHeaderBranding();
   setFacilityNote('施設位置を保存しました。出発・帰還の地点がこの位置に切り替わりました。');
 }
 
@@ -2747,30 +2748,34 @@ function formatPrintServiceDate(dateStr) {
   return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日（${weekday}）`;
 }
 
-const DEFAULT_APP_BRAND = {
-  fullName: 'shuttle-planner | 送迎計画・運行最適化',
-  shortName: 'shuttle-planner 送迎管理',
-  subtitle: '福祉・通所介護・スクール向け送迎最適化',
-  productName: 'shuttle-planner',
-  planLabel: '本日の送迎運行計画'
-};
-
-function appBrand() {
-  const facility = typeof getFacility === 'function' ? getFacility() : null;
-  const custom = facility && typeof facility.systemName === 'string' ? facility.systemName.trim() : '';
-  if (!custom) return DEFAULT_APP_BRAND;
-  return {
-    fullName: custom,
-    shortName: custom,
-    subtitle: DEFAULT_APP_BRAND.subtitle,
-    productName: custom,
-    planLabel: DEFAULT_APP_BRAND.planLabel
-  };
+function facilityBrandToken() {
+  const name = typeof getFacilityBrandName === 'function'
+    ? getFacilityBrandName()
+    : (typeof getFacility === 'function' && getFacility().name ? String(getFacility().name).trim() : '');
+  return name || 'shuttle-planner';
 }
 
 function planTextHeader() {
-  const brand = appBrand();
-  return `【${brand.planLabel} - ${brand.productName}】`;
+  return `【本日の送迎運行計画 - ${facilityBrandToken()}】`;
+}
+
+function updateHeaderBranding() {
+  const token = facilityBrandToken();
+  const nameEl = document.getElementById('headerFacilityName');
+  if (nameEl) nameEl.textContent = token;
+  document.title = `${token} | 送迎計画・運行最適化`;
+  const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if (apple) apple.setAttribute('content', `${token} 送迎管理`);
+  const printTitle = document.getElementById('printPlanTitle');
+  if (printTitle) printTitle.textContent = `本日の送迎運行計画 - ${token}`;
+  if (routePlanBase) {
+    routePlanBase = applyPlanBrandHeader(routePlanBase);
+    const box = document.getElementById('resultText');
+    if (box && box.textContent) box.textContent = routePlanBase;
+  }
+  if (typeof lastGeneratedPlan === 'string' && lastGeneratedPlan) {
+    lastGeneratedPlan = applyPlanBrandHeader(lastGeneratedPlan);
+  }
 }
 
 function applyPlanBrandHeader(text) {
@@ -2785,21 +2790,8 @@ function applyPlanBrandHeader(text) {
   return `${header}\n${body}`;
 }
 
-function syncAppBrand() {
-  const brand = appBrand();
-  document.title = brand.fullName;
-  const title = document.querySelector('.app-title');
-  if (title) title.textContent = brand.shortName;
-  const subtitle = document.querySelector('.app-subtitle');
-  if (subtitle) subtitle.textContent = brand.subtitle;
-  const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-  if (apple) apple.setAttribute('content', brand.shortName);
-  const printTitle = document.getElementById('printPlanTitle');
-  if (printTitle) printTitle.textContent = `${brand.planLabel} - ${brand.productName}`;
-}
-
 function syncPrintHeader() {
-  syncAppBrand();
+  updateHeaderBranding();
   const dateEl = document.getElementById('printServiceDate');
   const metaEl = document.getElementById('printCreatedMeta');
   if (dateEl) dateEl.textContent = `運行日: ${formatPrintServiceDate(getSelectedServiceDate())}`;
@@ -2986,7 +2978,7 @@ function maybeShowTutorialOnLaunch() {
 bindCarReorderGestures();
 bindPlacePickerFields();
 bindFacilityPlaceFields();
-syncAppBrand();
+updateHeaderBranding();
 window.addEventListener('beforeprint', syncPrintHeader);
 
 
@@ -3068,7 +3060,7 @@ window.addEventListener('beforeprint', syncPrintHeader);
     togglePassengerDayStatus,
     runDispatchWithRoute,
     printDispatchSheet,
-    syncAppBrand,
+    updateHeaderBranding,
     searchFacilityPlace,
     saveFacilityPlace,
     togglePlacePicker,
