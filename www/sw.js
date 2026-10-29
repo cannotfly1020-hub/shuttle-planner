@@ -1,5 +1,5 @@
 /* 送迎計画 — Cache First Service Worker */
-const CACHE_NAME = 'haisha-cache-v20261029s';
+const CACHE_NAME = 'haisha-cache-v20261029u';
 
 const PRECACHE_URLS = [
   './',
@@ -14,12 +14,12 @@ const PRECACHE_URLS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   // index.html が参照するキャッシュバスター付き URL も事前格納
-  './css/style.css?v=20261029s',
-  './js/data.js?v=20261029s',
-  './js/ui.js?v=20261029s',
-  './js/carpool.js?v=20261029s',
-  './js/route.js?v=20261029s',
-  './js/app.js?v=20261029s'
+  './css/style.css?v=20261029u',
+  './js/data.js?v=20261029u',
+  './js/ui.js?v=20261029u',
+  './js/carpool.js?v=20261029u',
+  './js/route.js?v=20261029u',
+  './js/app.js?v=20261029u'
 ];
 
 self.addEventListener('install', (event) => {

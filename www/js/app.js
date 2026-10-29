@@ -8,6 +8,7 @@ const CLICK_ACTIONS = new Set([
   'toggle-car-sort',
   'sort-grade',
   'sort-name',
+  'set-name-display',
   'promote',
   'add-car',
   'add-child',
@@ -104,6 +105,9 @@ function runClickAction(target) {
       break;
     case 'sort-name':
       setChildSortMode('kana');
+      break;
+    case 'set-name-display':
+      setNameDisplayMode(target.dataset.mode || 'kanji');
       break;
     case 'promote':
       promoteAllGrades();

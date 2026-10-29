@@ -75,6 +75,86 @@ function comparePersonName(a, b) {
   return textOrEmpty(a && a.name).localeCompare(textOrEmpty(b && b.name), 'ja');
 }
 
+/** 五十音の比較キー。ふりがなが空なら氏名を使う。 */
+function passengerReading(passenger) {
+  const reading = textOrEmpty(passenger && passenger.furigana).trim();
+  if (reading) return reading;
+  return textOrEmpty(passenger && passenger.name).trim();
+}
+
+function comparePassengerReading(a, b) {
+  return passengerReading(a).localeCompare(passengerReading(b), 'ja');
+}
+
+function readingOrName(reading, name) {
+  const next = textOrEmpty(reading).trim().slice(0, 40);
+  if (next) return next;
+  return textOrEmpty(name).trim().slice(0, 40);
+}
+
+const NAME_DISPLAY_KEY = 'shuttle_name_display_mode_v1';
+let currentNameDisplayMode = 'kanji';
+
+function readNameDisplayMode() {
+  try {
+    const raw = localStorage.getItem(NAME_DISPLAY_KEY);
+    if (raw === 'hiragana' || raw === 'kanji') return raw;
+  } catch (e) { /* ignore */ }
+  return 'kanji';
+}
+
+currentNameDisplayMode = readNameDisplayMode();
+
+function getDisplayName(passenger) {
+  if (!passenger) return '';
+  if (currentNameDisplayMode === 'hiragana') {
+    return passenger.furigana || passenger.name || '';
+  }
+  return passenger.name || '';
+}
+
+function applyDisplayNamesToPlanText(text) {
+  const body = String(text || '');
+  if (currentNameDisplayMode !== 'hiragana' || !body) return body;
+  const people = (Array.isArray(children) ? children : [])
+    .filter((passenger) => {
+      const name = passenger && typeof passenger.name === 'string' ? passenger.name : '';
+      if (!name) return false;
+      return getDisplayName(passenger) !== name;
+    })
+    .slice()
+    .sort((a, b) => String(b.name).length - String(a.name).length);
+  return people.reduce((out, passenger) => out.split(passenger.name).join(getDisplayName(passenger)), body);
+}
+
+function updateNameDisplayToggle() {
+  const mode = currentNameDisplayMode === 'hiragana' ? 'hiragana' : 'kanji';
+  ['nameDisplayKanji', 'nameDisplayHiragana'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const on = btn.dataset.mode === mode;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function passengerByStop(schedule, stop) {
+  if (Array.isArray(children)) {
+    const master = children.find((item) => item && String(item.id) === String(stop && stop.id));
+    if (master) return master;
+  }
+  const riders = schedule && Array.isArray(schedule.route) ? schedule.route : [];
+  return riders.find((passenger) => passenger && String(passenger.id) === String(stop && stop.id)) || null;
+}
+
+function stopDisplayName(schedule, stop) {
+  if (!stop) return '';
+  if (stop.type !== 'passenger') return textOrEmpty(stop.name);
+  const passenger = passengerByStop(schedule, stop);
+  if (passenger) return getDisplayName(passenger);
+  return textOrEmpty(stop.name);
+}
+
 /** 区分/クラス。未設定なら旧 grade */
 function passengerGroupClass(passenger) {
   if (!passenger || typeof passenger !== 'object') return '';
@@ -281,7 +361,7 @@ function buildCareTagBadgesHtml(passenger) {
 
 function compareChildrenForSort(a, b, mode) {
   if (mode === 'kana') {
-    return comparePersonName(a, b);
+    return comparePassengerReading(a, b);
   }
   if (mode === 'grade') {
     const ga = groupClassSortNumber(a);
@@ -1441,6 +1521,10 @@ function buildChildCompanionChipsHtml(child) {
   `).join('');
 }
 
+function childNameHtml(passenger) {
+  return `<span class="child-name">${escapeRoleText(getDisplayName(passenger))}</span>`;
+}
+
 function childRowHtml(c) {
   const status = passengerDayStatus(c);
   const view = dayStatusView(status);
@@ -1467,7 +1551,7 @@ function childRowHtml(c) {
               <option value="ride" ${mode === 'ride' ? 'selected' : ''}>乗車</option>
               <option value="site" ${mode === 'site' ? 'selected' : ''}>現地</option>
             </select>
-            <span class="child-name">${c.name}</span>
+            ${childNameHtml(c)}
             ${chipsHtml}
             ${mode === 'ride' && !editorOpen && !rosterLocked ? `
               <button type="button" class="btn-add-companion" data-action="open-child-companion" data-id="${c.id}">＋同乗</button>
@@ -1538,6 +1622,7 @@ function resetVehiclesToDefaultView() {
   resetVehiclesToDefault();
   if (typeof rewriteLegacyVehicleText === 'function') {
     if (typeof routePlanBase === 'string' && routePlanBase) routePlanBase = rewriteLegacyVehicleText(routePlanBase);
+    if (typeof canonicalGeneratedPlan === 'string' && canonicalGeneratedPlan) canonicalGeneratedPlan = rewriteLegacyVehicleText(canonicalGeneratedPlan);
     if (typeof lastGeneratedPlan === 'string' && lastGeneratedPlan) lastGeneratedPlan = rewriteLegacyVehicleText(lastGeneratedPlan);
     const box = document.getElementById('resultText');
     if (box && box.textContent) box.textContent = rewriteLegacyVehicleText(box.textContent);
@@ -2148,6 +2233,8 @@ function openEditModal(id) {
   if (!kid) return;
   document.getElementById('editChildId').value = kid.id;
   document.getElementById('editChildName').value = kid.name;
+  const furiganaInput = document.getElementById('editChildFurigana');
+  if (furiganaInput) furiganaInput.value = passengerReading(kid);
   document.getElementById('editChildGrade').value = textOrEmpty(passengerGroupClass(kid));
   document.getElementById('editChildPos').value = passengerCareTags(kid).join(', ');
   renderSchedulePills('edit', kid.schedulePattern);
@@ -2185,7 +2272,10 @@ function saveEditChild() {
   const id = parseInt(document.getElementById('editChildId').value);
   const kid = children.find(x => x.id === id);
   if (kid) {
-    kid.name = document.getElementById('editChildName').value.trim() || kid.name;
+    const nextName = document.getElementById('editChildName').value.trim() || kid.name;
+    kid.name = nextName;
+    const furiganaInput = document.getElementById('editChildFurigana');
+    kid.furigana = readingOrName(furiganaInput ? furiganaInput.value : '', nextName);
     applyGroupClass(kid, document.getElementById('editChildGrade').value);
     kid.schedulePattern = selectedScheduleDays('edit');
     applyCareTagInput(kid, document.getElementById('editChildPos').value, document.getElementById('editChildMotionSick').checked);
@@ -2254,12 +2344,14 @@ function addCar() {
 
 function addChild() {
   const nameInput = document.getElementById('newChildName');
+  const furiganaInput = document.getElementById('newChildFurigana');
   const gradeInput = document.getElementById('newChildGrade');
   const posInput = document.getElementById('newChildPos');
   const parentSelect = document.getElementById('newChildParentCar');
   const motionInput = document.getElementById('newChildMotionSick');
 
   const name = nameInput ? nameInput.value.trim() : '';
+  const furigana = readingOrName(furiganaInput ? furiganaInput.value : '', name);
   const gradeRaw = gradeInput ? gradeInput.value.trim() : '';
   const posRaw = posInput ? posInput.value : '';
   const parent = parentSelect ? parentSelect.value : '';
@@ -2269,6 +2361,7 @@ function addChild() {
     const passenger = normalizeChild({
       id: Date.now(),
       name: name,
+      furigana: furigana,
       grade: '',
       groupClass: '',
       pos: '',
@@ -2298,6 +2391,7 @@ function addChild() {
     saveData();
     refreshLists();
     if (nameInput) nameInput.value = '';
+    if (furiganaInput) furiganaInput.value = '';
     if (gradeInput) gradeInput.value = '';
     if (posInput) posInput.value = '';
     if (parentSelect) parentSelect.value = '';
@@ -2349,6 +2443,7 @@ function applyPassengerPlace(passenger, scope) {
 }
 
 let routePlanBase = '';
+let canonicalGeneratedPlan = '';
 let facilityFormDirty = false;
 let facilityMapState = null;
 let facilityPlaceSeq = 0;
@@ -2791,12 +2886,15 @@ function updateHeaderBranding() {
   if (apple) apple.setAttribute('content', headerBrandLabel());
   const printTitle = document.getElementById('printPlanTitle');
   if (printTitle) printTitle.textContent = `本日の送迎運行計画 - ${token}`;
+  if (canonicalGeneratedPlan) canonicalGeneratedPlan = applyPlanBrandHeader(canonicalGeneratedPlan);
   if (routePlanBase) {
     routePlanBase = applyPlanBrandHeader(routePlanBase);
     const box = document.getElementById('resultText');
-    if (box && box.textContent) box.textContent = routePlanBase;
+    if (box && box.textContent) box.textContent = applyDisplayNamesToPlanText(routePlanBase);
   }
-  if (typeof lastGeneratedPlan === 'string' && lastGeneratedPlan) {
+  if (canonicalGeneratedPlan) {
+    lastGeneratedPlan = applyDisplayNamesToPlanText(canonicalGeneratedPlan);
+  } else if (typeof lastGeneratedPlan === 'string' && lastGeneratedPlan) {
     lastGeneratedPlan = applyPlanBrandHeader(lastGeneratedPlan);
   }
 }
@@ -2853,7 +2951,7 @@ function renderPrintTimelineTable(schedule) {
     if (stop.type === 'passenger') {
       const tags = (stop.careTags || []).map((tag) => `<span class="care-tag-badge">${escapeRoleText(tag)}</span>`).join('');
       const dwell = Number.isFinite(stop.dwellMinutes) ? `${stop.dwellMinutes}分` : '';
-      return `<tr><td>${escapeRoleText(stop.arrivalTime)}着 ${escapeRoleText(stop.departureTime)}発</td><td>${escapeRoleText(stop.name)}</td><td>${tags}</td><td>${dwell}</td><td>${escapeRoleText(stop.address || '')}</td></tr>`;
+      return `<tr><td>${escapeRoleText(stop.arrivalTime)}着 ${escapeRoleText(stop.departureTime)}発</td><td>${escapeRoleText(stopDisplayName(schedule, stop))}</td><td>${tags}</td><td>${dwell}</td><td>${escapeRoleText(stop.address || '')}</td></tr>`;
     }
     if (stop.type === 'depot_end') {
       return `<tr><td>${escapeRoleText(stop.arrivalTime)}着</td><td>到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</td><td></td><td></td><td>${facilityAddress}</td></tr>`;
@@ -2884,9 +2982,10 @@ function renderRouteTimeline(schedules) {
       if (stop.type === 'passenger') {
         const tags = stop.careTags && stop.careTags.length ? ` [${escapeRoleText(stop.careTags.join('、'))}]` : '';
         const address = stop.address ? `<div class="route-address">${escapeRoleText(stop.address)}</div>` : '';
-        const mapLink = routeMapAnchor(passengerMapPoint(schedule, stop), `${stop.name}の案内をGoogleマップで開く`);
+        const shownName = stopDisplayName(schedule, stop);
+        const mapLink = routeMapAnchor(passengerMapPoint(schedule, stop), `${shownName}の案内をGoogleマップで開く`);
         return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
-          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}着 - ${escapeRoleText(stop.departureTime)}発</span><span class="route-stop-body">${escapeRoleText(stop.name)}${tags} <em class="route-dwell">乗降${stop.dwellMinutes}分</em></span>${mapLink}</div>${address}`;
+          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}着 - ${escapeRoleText(stop.departureTime)}発</span><span class="route-stop-body">${escapeRoleText(shownName)}${tags} <em class="route-dwell">乗降${stop.dwellMinutes}分</em></span>${mapLink}</div>${address}`;
       }
       if (stop.type === 'depot_end') {
         const mapLink = routeMapAnchor(facility, `${stop.name}への到着案内をGoogleマップで開く`);
@@ -2901,14 +3000,50 @@ function renderRouteTimeline(schedules) {
   }).join('');
 }
 
+function refreshWarningDisplay() {
+  const el = document.getElementById('resultWarnings');
+  if (!el || el.hidden) return;
+  const source = (typeof HaishaCarpool !== 'undefined' && HaishaCarpool && Array.isArray(HaishaCarpool.assignmentWarnings))
+    ? HaishaCarpool.assignmentWarnings
+    : [];
+  if (!source.length) return;
+  el.innerHTML = source.map((text) =>
+    `<p class="result-warning-badge">${escapeRoleText(applyDisplayNamesToPlanText(text))}</p>`
+  ).join('');
+}
+
+function refreshDisplayedPlanNames() {
+  if (currentAssignments) {
+    renderRouteTimeline(buildCurrentRouteSchedules());
+  }
+  if (canonicalGeneratedPlan) {
+    lastGeneratedPlan = applyDisplayNamesToPlanText(canonicalGeneratedPlan);
+  }
+  const box = document.getElementById('resultText');
+  if (box && routePlanBase) box.textContent = applyDisplayNamesToPlanText(routePlanBase);
+  refreshWarningDisplay();
+}
+
+function setNameDisplayMode(mode) {
+  currentNameDisplayMode = mode === 'hiragana' ? 'hiragana' : 'kanji';
+  try {
+    localStorage.setItem(NAME_DISPLAY_KEY, currentNameDisplayMode);
+  } catch (e) { /* ignore */ }
+  updateNameDisplayToggle();
+  renderChildren();
+  refreshDisplayedPlanNames();
+}
+
 function publishRouteTimeline(baseText) {
   const branded = applyPlanBrandHeader(baseText || '');
   routePlanBase = stripRouteSection(branded);
   const schedules = buildCurrentRouteSchedules();
   renderRouteTimeline(schedules);
-  lastGeneratedPlan = mergeRouteIntoPlan(routePlanBase, schedules);
+  canonicalGeneratedPlan = mergeRouteIntoPlan(routePlanBase, schedules);
+  lastGeneratedPlan = applyDisplayNamesToPlanText(canonicalGeneratedPlan);
   const box = document.getElementById('resultText');
-  if (box) box.textContent = routePlanBase;
+  if (box) box.textContent = applyDisplayNamesToPlanText(routePlanBase);
+  refreshWarningDisplay();
 }
 
 function runDispatchWithRoute() {
@@ -2916,6 +3051,7 @@ function runDispatchWithRoute() {
   const card = document.getElementById('resultCard');
   if (!card || card.style.display === 'none' || !currentAssignments) {
     routePlanBase = '';
+    canonicalGeneratedPlan = '';
     renderRouteTimeline([]);
     return;
   }
@@ -3002,6 +3138,7 @@ bindCarReorderGestures();
 bindPlacePickerFields();
 bindFacilityPlaceFields();
 updateHeaderBranding();
+updateNameDisplayToggle();
 window.addEventListener('beforeprint', syncPrintHeader);
 
 
@@ -3040,6 +3177,8 @@ window.addEventListener('beforeprint', syncPrintHeader);
     sortChildrenByGrade,
     sortChildrenByName,
     setChildSortMode,
+    setNameDisplayMode,
+    getDisplayName,
     readChildSortMode,
     writeChildSortMode,
     getSortedChildrenForRender,

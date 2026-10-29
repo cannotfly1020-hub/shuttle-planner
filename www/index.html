@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="スマート送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029s">
+<link rel="stylesheet" href="css/style.css?v=20261029u">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -106,12 +106,21 @@
           <option value="position">並び順: 要配慮順</option>
           <option value="kana">並び順: 50音順</option>
         </select>
+        <div class="name-display-switch" role="group" aria-label="氏名の表記">
+          <span class="name-display-label">表記</span>
+          <button type="button" class="name-display-btn is-active" id="nameDisplayKanji" data-action="set-name-display" data-mode="kanji" aria-pressed="true">漢字</button>
+          <button type="button" class="name-display-btn" id="nameDisplayHiragana" data-action="set-name-display" data-mode="hiragana" aria-pressed="false">ひらがな</button>
+        </div>
       </div>
       <div id="childList"></div>
       <div class="add-form add-form-child">
         <label class="add-field">
           <span>利用者名</span>
           <input type="text" id="newChildName" placeholder="名前" aria-label="利用者名">
+        </label>
+        <label class="add-field">
+          <span>ふりがな</span>
+          <input type="text" id="newChildFurigana" placeholder="例: やまだ たろう" maxlength="40" aria-label="ふりがな">
         </label>
         <label class="add-field">
           <span>区分 / クラス</span>
@@ -372,6 +381,10 @@
       <input type="text" id="editChildName">
     </div>
     <div class="modal-field">
+      <label for="editChildFurigana">ふりがな</label>
+      <input type="text" id="editChildFurigana" maxlength="40" placeholder="例: やまだ たろう">
+    </div>
+    <div class="modal-field">
       <label for="editChildGrade">区分 / クラス</label>
       <input type="text" id="editChildGrade" maxlength="20" placeholder="例: 小学部, A組, デイ">
     </div>
@@ -438,11 +451,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029s"></script>
-<script src="js/ui.js?v=20261029s"></script>
-<script src="js/carpool.js?v=20261029s"></script>
-<script src="js/route.js?v=20261029s"></script>
-<script src="js/app.js?v=20261029s"></script>
+<script src="js/data.js?v=20261029u"></script>
+<script src="js/ui.js?v=20261029u"></script>
+<script src="js/carpool.js?v=20261029u"></script>
+<script src="js/route.js?v=20261029u"></script>
+<script src="js/app.js?v=20261029u"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

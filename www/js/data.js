@@ -817,12 +817,12 @@ function familySeatsOf(car) {
 
 function createDefaultChildren() {
   return [
-    { id: 1, name: 'ゆうと', groupClass: '小学部', grade: '小学部', careTags: ['見守り'], pos: '', parentCar: '1号車', fixedVehicle: '1号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市綾羅木町1-1', lat: 33.968, lng: 130.95, boardingTimeMinutes: null },
-    { id: 2, name: 'そうた', groupClass: '小学部', grade: '小学部', careTags: [], pos: '', parentCar: '2号車', fixedVehicle: '2号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市安岡町2-2', lat: 33.95, lng: 130.958, boardingTimeMinutes: null },
-    { id: 3, name: 'れん', groupClass: 'A組', grade: 'A組', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市椋野町3-3', lat: 33.9665, lng: 130.928, boardingTimeMinutes: null },
-    { id: 4, name: 'はると', groupClass: 'A組', grade: 'A組', careTags: ['車椅子'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市吉見町4-4', lat: 33.9495, lng: 130.9305, boardingTimeMinutes: null },
-    { id: 5, name: 'こうき', groupClass: 'デイ', grade: 'デイ', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市秋根町5-5', lat: 33.961, lng: 130.9625, boardingTimeMinutes: null },
-    { id: 6, name: '大和', groupClass: 'デイ', grade: 'デイ', careTags: ['見守り'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市富任町6-6', lat: 33.946, lng: 130.9485, boardingTimeMinutes: null }
+    { id: 1, name: 'ゆうと', furigana: 'ゆうと', groupClass: '小学部', grade: '小学部', careTags: ['見守り'], pos: '', parentCar: '1号車', fixedVehicle: '1号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市綾羅木町1-1', lat: 33.968, lng: 130.95, boardingTimeMinutes: null },
+    { id: 2, name: 'そうた', furigana: 'そうた', groupClass: '小学部', grade: '小学部', careTags: [], pos: '', parentCar: '2号車', fixedVehicle: '2号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市安岡町2-2', lat: 33.95, lng: 130.958, boardingTimeMinutes: null },
+    { id: 3, name: 'れん', furigana: 'れん', groupClass: 'A組', grade: 'A組', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市椋野町3-3', lat: 33.9665, lng: 130.928, boardingTimeMinutes: null },
+    { id: 4, name: 'はると', furigana: 'はると', groupClass: 'A組', grade: 'A組', careTags: ['車椅子'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市吉見町4-4', lat: 33.9495, lng: 130.9305, boardingTimeMinutes: null },
+    { id: 5, name: 'こうき', furigana: 'こうき', groupClass: 'デイ', grade: 'デイ', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市秋根町5-5', lat: 33.961, lng: 130.9625, boardingTimeMinutes: null },
+    { id: 6, name: '大和', furigana: 'やまと', groupClass: 'デイ', grade: 'デイ', careTags: ['見守り'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市富任町6-6', lat: 33.946, lng: 130.9485, boardingTimeMinutes: null }
   ];
 }
 
@@ -842,12 +842,20 @@ function normalizeChildCompanions(child) {
   return [];
 }
 
+function normalizeFurigana(child) {
+  const reading = child && typeof child.furigana === 'string' ? child.furigana.trim().slice(0, 40) : '';
+  if (reading) return reading;
+  const name = child && typeof child.name === 'string' ? child.name.trim().slice(0, 40) : '';
+  return name;
+}
+
 function normalizeChild(child) {
   const meetOnSite = !!child.meetOnSite;
   const companions = meetOnSite ? [] : normalizeChildCompanions(child);
   const parsedDays = coerceDayList(child.schedulePattern);
   return {
     ...child,
+    furigana: normalizeFurigana(child),
     active: !!child.active,
     meetOnSite: meetOnSite,
     companions: companions,
