@@ -85,10 +85,7 @@ function passengerGroupClass(passenger) {
 }
 
 function formatGroupClassLabel(passenger) {
-  const text = textOrEmpty(passengerGroupClass(passenger));
-  if (!text) return '';
-  if (/^\d+$/.test(text)) return `${text}年`;
-  return text;
+  return textOrEmpty(passengerGroupClass(passenger));
 }
 
 function groupClassSortNumber(passenger) {
@@ -139,6 +136,10 @@ function legacyPositionLabel(passenger) {
   return positions[0] || '';
 }
 
+function parseCareTagInput(raw) {
+  return listFromUnknown(raw).filter((tag) => !isLegacyPositionLabel(tag));
+}
+
 function careTagSortKey(passenger) {
   return explicitCareTags(passenger).join('\u0000');
 }
@@ -170,15 +171,20 @@ function applyFixedVehicle(passenger, name) {
   passenger.parentCar = value;
 }
 
-function applyLegacyPositionField(passenger, raw) {
+function applyCareTagInput(passenger, raw, motionChecked) {
   if (!passenger) return;
-  const pos = textOrEmpty(raw) || '未定';
-  passenger.pos = pos;
-  passenger.positions = pos && pos !== '未定' ? [pos] : [];
-  if (!isLegacyPositionLabel(pos)) {
-    const kept = listFromUnknown(passenger.careTags).filter((tag) => tag.indexOf('酔') === -1);
-    passenger.careTags = kept.concat([pos]);
-  }
+  const typed = parseCareTagInput(raw);
+  const tags = typed.filter((tag) => tag.indexOf('酔') === -1);
+  const motion = !!motionChecked || typed.some((tag) => tag.indexOf('酔') !== -1);
+  if (motion) tags.push('車酔い配慮');
+  passenger.careTags = tags;
+  passenger.positions = tags.slice();
+  passenger.pos = tags[0] || '';
+  passenger.motionSick = motion;
+}
+
+function careTagsInputValue(passenger) {
+  return passengerCareTags(passenger).filter((tag) => tag.indexOf('酔') === -1).join(', ');
 }
 
 function syncMotionCareTag(passenger) {
@@ -202,17 +208,17 @@ function applySpecialVehicle(vehicle, checked) {
   vehicle.isEquipmentCar = next;
 }
 
-/** 運転者。driverRole を優先し、旧 driver にフォールバック */
+/** 運転者。driverRole を優先し、旧 driver と家族呼称にフォールバック */
 function vehicleDriverLabel(vehicle) {
   if (!vehicle || typeof vehicle !== 'object') return '';
-  const role = textOrEmpty(vehicle.driverRole);
-  if (role) return role;
-  return textOrEmpty(vehicle.driver);
+  const role = textOrEmpty(vehicle.driverRole) || textOrEmpty(vehicle.driver);
+  if (role === '父' || role === '母' || role === '祖父' || role === '祖母' || role === 'コーチ') return 'ドライバー';
+  return role;
 }
 
 function fixedVehicleAutoLabel(passenger) {
   const name = passengerFixedVehicleName(passenger);
-  if (name) return `自動（固定:${name}）`;
+  if (name) return `自動（拘束:${name}）`;
   return '自動（指定なし）';
 }
 
@@ -578,9 +584,9 @@ function updatePanelSummaries(activeCarsList, activeSeats, seatDemand, activeKid
   if (carsSummary) {
     // 常に文言付きテンプレート（単独の "0" を出さない）
     if (remaining < 0) {
-      carsSummary.textContent = `出勤 ${carCount}台 / ${seatCount}席（${Math.abs(remaining)}席不足）`;
+      carsSummary.textContent = `稼働 ${carCount}台 / ${seatCount}席（${Math.abs(remaining)}席不足）`;
     } else {
-      carsSummary.textContent = `出勤 ${carCount}台 / ${seatCount}席`;
+      carsSummary.textContent = `稼働 ${carCount}台 / ${seatCount}席`;
     }
     carsSummary.hidden = false;
   }
@@ -645,7 +651,7 @@ function updateCarSelectOptions() {
   if (!addSelect) return;
 
   let currentAddVal = addSelect.value;
-  addSelect.innerHTML = '<option value="">固定車両: なし</option>';
+  addSelect.innerHTML = '<option value="">専用車両: なし</option>';
   cars.forEach(c => {
     addSelect.innerHTML += `<option value="${c.name}">${c.name}</option>`;
   });
@@ -653,7 +659,7 @@ function updateCarSelectOptions() {
 
   if (editSelect) {
     let currentEditVal = editSelect.value;
-    editSelect.innerHTML = '<option value="">固定車両: なし</option>';
+    editSelect.innerHTML = '<option value="">専用車両: なし</option>';
     cars.forEach(c => {
       editSelect.innerHTML += `<option value="${c.name}">${c.name}</option>`;
     });
@@ -705,13 +711,13 @@ function buildDriverSelectHtml(car) {
   const current = vehicleDriverLabel(car);
   const options = roles.slice();
   if (current && options.indexOf(current) === -1) options.unshift(current);
-  if (!options.length) options.push(current || '父');
+  if (!options.length) options.push(current || 'ドライバー');
   const selected = options.indexOf(current) !== -1 ? current : options[0];
   const html = options.map((role) => {
     const safe = escapeRoleText(role);
     return `<option value="${safe}" ${selected === role ? 'selected' : ''}>${safe}</option>`;
   }).join('');
-  return `<label class="driver-select-label"><span>運転:</span><select class="car-driver-select" data-action="set-car-driver" data-id="${car.id}" data-car-id="${car.id}" aria-label="本日の運転者">${html}</select></label>`;
+  return `<label class="driver-select-label"><span>ドライバー:</span><select class="car-driver-select" data-action="set-car-driver" data-id="${car.id}" data-car-id="${car.id}" aria-label="本日のドライバー">${html}</select></label>`;
 }
 
 function setCarDriverRole(id, role) {
@@ -756,8 +762,8 @@ function toggleRoleMaster() {
   box.hidden = !willOpen;
   btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   btn.textContent = willOpen
-    ? '🏷️ 運転者・同乗者ラベルを編集 ▲'
-    : '🏷️ 運転者・同乗者ラベルを編集 ▼';
+    ? '🏷️ ドライバー・同乗者ラベルを編集 ▲'
+    : '🏷️ ドライバー・同乗者ラベルを編集 ▼';
 }
 
 function addRoleLabel(inputId, getter, saver, emptyMessage) {
@@ -780,7 +786,7 @@ function addRoleLabel(inputId, getter, saver, emptyMessage) {
 }
 
 function addDriverRoleFromInput() {
-  addRoleLabel('driverRoleInput', getDriverRoles, saveDriverRoles, '運転者ラベルを入力してください。');
+  addRoleLabel('driverRoleInput', getDriverRoles, saveDriverRoles, 'ドライバーラベルを入力してください。');
 }
 
 function addCompanionRoleFromInput() {
@@ -952,7 +958,7 @@ function renderChildren() {
             ` : ''}
             ${groupLabel ? `<span class="badge-sub">${escapeRoleText(groupLabel)}</span>` : ''}
             ${careBadges}
-            ${fixedVehicleName ? `<span class="badge">固定:${escapeRoleText(fixedVehicleName)}</span>` : ''}
+            ${fixedVehicleName ? `<span class="badge">拘束:${escapeRoleText(fixedVehicleName)}</span>` : ''}
             ${mode === 'site' ? `<span class="badge-site">現地</span>` : ''}
             ${c.fixedCar && mode === 'ride' ? `<span class="badge-fixed">📌${escapeRoleText(c.fixedCar)}</span>` : ''}
           </div>
@@ -1173,8 +1179,8 @@ function openEditModal(id) {
   if (!kid) return;
   document.getElementById('editChildId').value = kid.id;
   document.getElementById('editChildName').value = kid.name;
-  document.getElementById('editChildGrade').value = passengerGroupClass(kid) || 6;
-  document.getElementById('editChildPos').value = legacyPositionLabel(kid) || '未定';
+  document.getElementById('editChildGrade').value = textOrEmpty(passengerGroupClass(kid));
+  document.getElementById('editChildPos').value = careTagsInputValue(kid);
   document.getElementById('editChildMotionSick').checked = !!kid.motionSick;
   updateCarSelectOptions();
   document.getElementById('editChildParentCar').value = passengerFixedVehicleName(kid);
@@ -1199,10 +1205,8 @@ function saveEditChild() {
   if (kid) {
     kid.name = document.getElementById('editChildName').value.trim() || kid.name;
     applyGroupClass(kid, document.getElementById('editChildGrade').value);
-    applyLegacyPositionField(kid, document.getElementById('editChildPos').value);
+    applyCareTagInput(kid, document.getElementById('editChildPos').value, document.getElementById('editChildMotionSick').checked);
     applyFixedVehicle(kid, document.getElementById('editChildParentCar').value);
-    kid.motionSick = document.getElementById('editChildMotionSick').checked;
-    syncMotionCareTag(kid);
 
     const nextFixed = document.getElementById('editChildFixedCar').value || '';
     if (nextFixed) {
@@ -1272,38 +1276,39 @@ function addChild() {
   const motionInput = document.getElementById('newChildMotionSick');
 
   const name = nameInput ? nameInput.value.trim() : '';
-  const gradeRaw = gradeInput ? gradeInput.value : '';
-  const gradeNumber = parseInt(gradeRaw, 10);
-  const grade = gradeRaw === '' || Number.isNaN(gradeNumber) ? (gradeRaw || 6) : gradeNumber;
-  const pos = posInput ? posInput.value : '';
+  const gradeRaw = gradeInput ? gradeInput.value.trim() : '';
+  const posRaw = posInput ? posInput.value : '';
   const parent = parentSelect ? parentSelect.value : '';
   const motionSick = !!(motionInput && motionInput.checked);
-  const careTags = [];
-  if (pos && !isLegacyPositionLabel(pos)) careTags.push(pos);
-  if (motionSick && careTags.indexOf('車酔い配慮') === -1) careTags.push('車酔い配慮');
 
   if (name) {
-    children.push(normalizeChild({
+    const passenger = normalizeChild({
       id: Date.now(),
       name: name,
-      grade: grade,
-      groupClass: grade,
-      pos: pos,
-      positions: pos && pos !== '未定' ? [pos] : [],
-      careTags: careTags,
-      parentCar: parent,
-      fixedVehicle: parent,
+      grade: '',
+      groupClass: '',
+      pos: '',
+      positions: [],
+      careTags: [],
+      parentCar: '',
+      fixedVehicle: '',
       fixedCar: '',
-      motionSick: motionSick,
+      motionSick: false,
       companions: [],
       active: true,
       meetOnSite: false,
       lastCar: '',
       rideHistory: {}
-    }));
+    });
+    applyGroupClass(passenger, gradeRaw);
+    applyFixedVehicle(passenger, parent);
+    applyCareTagInput(passenger, posRaw, motionSick);
+    children.push(passenger);
     saveData();
     refreshLists();
     if (nameInput) nameInput.value = '';
+    if (gradeInput) gradeInput.value = '';
+    if (posInput) posInput.value = '';
     if (parentSelect) parentSelect.value = '';
     if (motionInput) motionInput.checked = false;
   } else {

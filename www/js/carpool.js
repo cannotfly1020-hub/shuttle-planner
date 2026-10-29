@@ -221,7 +221,7 @@ function diagnoseCarpoolFailure(options) {
         suggestions.push({
           priority: 15,
           tag: 'A',
-          text: `選手「${k.name}」の同乗者（${labels}）を減らすと最大 ${n}席 空きます`
+          text: `利用者「${k.name}」の同乗者（${labels}）を減らすと最大 ${n}席 空きます`
         });
       });
   }
@@ -236,7 +236,7 @@ function diagnoseCarpoolFailure(options) {
       suggestions.push({
         priority: 20,
         tag: 'B',
-        text: `現在休止中の『${car.name}』を出勤にすると ${seats}席 確保できます`
+        text: `現在休止中の『${car.name}』を稼働にすると ${seats}席 確保できます`
       });
     });
 
@@ -280,10 +280,10 @@ function diagnoseCarpoolFailure(options) {
       suggestions.push({
         priority: 22,
         tag: 'E',
-        text: `🤢酔いの選手（${sickKids.map(k => k.name).join('、')}）を乗せる空き車両がありません。出勤を増やすか同乗を減らしてください`
+        text: `車酔い配慮の利用者（${sickKids.map(k => k.name).join('、')}）を乗せる空き車両がありません。稼働車両を増やすか同乗を減らしてください`
       });
     } else if (sickKids.length > carsWithRoom.length * 2) {
-      notes.push(`🤢酔い配慮: ${sickKids.map(k => k.name).join('、')}（空き車が少ない可能性）`);
+      notes.push(`車酔い配慮: ${sickKids.map(k => k.name).join('、')}（空き車両が少ない可能性）`);
     }
   }
 
@@ -291,7 +291,7 @@ function diagnoseCarpoolFailure(options) {
     suggestions.unshift({
       priority: 5,
       tag: 'B',
-      text: '出勤中の車がありません。車両の出勤チェックを入れてください'
+      text: '稼働中の車両がありません。車両の稼働チェックを入れてください'
     });
   }
 
@@ -324,10 +324,10 @@ function showCarpoolDiagnosis(diagnosis) {
   if (!el || !diagnosis) return;
 
   const shortageLine = diagnosis.shortage > 0
-    ? `必要座席数: ${diagnosis.totalNeed}席（選手・同乗 ${diagnosis.kidSeatDemand} ＋ 車両同乗 ${diagnosis.carCompanionSeats}）に対し、空き枠が ${diagnosis.shortage}席 不足しています（定員合計 ${diagnosis.totalCap}席）`
+    ? `必要座席数: ${diagnosis.totalNeed}席（利用者・同乗 ${diagnosis.kidSeatDemand} ＋ 車両同乗 ${diagnosis.carCompanionSeats}）に対し、空き枠が ${diagnosis.shortage}席 不足しています（定員合計 ${diagnosis.totalCap}席）`
     : diagnosis.leftoverKids && diagnosis.leftoverKids.length
-      ? `全体の席数は足りていますが、固定枠や1席余りの制約で一部の選手を割り当てられませんでした`
-      : `配車条件が競合しています。下記の調整をお試しください`;
+      ? `全体の席数は足りていますが、固定枠や1席余りの制約で一部の利用者を割り当てられませんでした`
+      : `運行条件が競合しています。下記の調整をお試しください`;
 
   const notesHtml = (diagnosis.notes || []).length
     ? `<ul class="diagnosis-list">${diagnosis.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`
@@ -341,7 +341,7 @@ function showCarpoolDiagnosis(diagnosis) {
 
   el.classList.toggle('is-warning', diagnosis.severity === 'warning');
   el.innerHTML = `
-    <h3 class="diagnosis-title">⚠️ 配車が成立しませんでした</h3>
+    <h3 class="diagnosis-title">⚠️ 送迎計画が成立しませんでした</h3>
     <div class="diagnosis-shortage"><strong>【不足状況】</strong><br>${escapeHtml(shortageLine)}</div>
     ${notesHtml ? `<p class="diagnosis-section-label">【診断メモ】</p>${notesHtml}` : ''}
     <p class="diagnosis-section-label">【解決アクションのサジェスト】（優先度順）</p>
@@ -571,18 +571,51 @@ function repairLeftovers(leftover, assignments, activeCars) {
   return still;
 }
 
+function planCareTags(kid) {
+  if (!kid) return [];
+  const source = Array.isArray(kid.careTags) ? kid.careTags : (Array.isArray(kid.positions) ? kid.positions : []);
+  const tags = source.map((tag) => String(tag || '').trim()).filter(Boolean);
+  const legacy = new Set(['投手', 'ピッチャー', 'P', '捕手', 'キャッチャー', 'C', '内野', '内野手', '外野', '外野手', '未定']);
+  const visible = tags.filter((tag) => !legacy.has(tag));
+  if (kid.motionSick && !visible.some((tag) => tag.indexOf('酔') !== -1)) visible.push('車酔い配慮');
+  return visible;
+}
+
+function planClassLabel(kid) {
+  if (!kid) return '';
+  const group = kid.groupClass != null ? String(kid.groupClass).trim() : '';
+  if (group) return group;
+  if (kid.grade != null && String(kid.grade).trim()) return String(kid.grade).trim();
+  return '';
+}
+
+function isSpecialPlanVehicle(car) {
+  if (!car) return false;
+  if (car.isSpecialVehicle != null && car.isSpecialVehicle !== '') return !!car.isSpecialVehicle;
+  return !!car.isEquipmentCar;
+}
+
 function collectSoftWarnings(assignments, activeCars) {
   const warnings = [];
   const median = medianCapacity(activeCars);
   activeCars.forEach((car) => {
     const riders = assignments[car.name] || [];
-    if (riders.length === 1) warnings.push(`※${car.name}は選手1名のみの乗車です`);
-    if (riders.filter(isPitcher).length >= 2) warnings.push(`※${car.name}に投手が重複しています`);
-    if (riders.filter(isCatcher).length >= 2) warnings.push(`※${car.name}に捕手が重複しています`);
+    if (riders.length === 1) {
+      const soloNg = planCareTags(riders[0]).some((tag) => tag.indexOf('単独') !== -1);
+      warnings.push(soloNg
+        ? `注意: ${riders[0].name}は単独乗車NGですが、${car.name}が1名乗車です`
+        : `注意: ${car.name}は利用者1名のみの乗車です`);
+    }
+    const wheelchairs = riders.filter((kid) => planCareTags(kid).some((tag) => tag.indexOf('車椅') !== -1));
+    if (wheelchairs.length >= 2) {
+      warnings.push(`注意: ${car.name}に車椅子の利用者が複数います（${wheelchairs.map((kid) => kid.name).join('、')}）`);
+    }
     const cap = parseInt(car.capacity, 10) || 0;
     if (cap < median) {
       riders.forEach((kid) => {
-        if (kid.motionSick) warnings.push(`※${kid.name}は車酔い配慮の車両に乗れていません`);
+        if (kid.motionSick || planCareTags(kid).some((tag) => tag.indexOf('酔') !== -1)) {
+          warnings.push(`注意: ${kid.name}は車酔い配慮の座席を優先できていません`);
+        }
       });
     }
   });
@@ -695,12 +728,12 @@ function generateCarpool() {
     }
 
     if (activeCars.length * 2 > ridingKids.length) {
-      warnings.push('車両数が多いため、1名乗車の車両が発生します');
+      warnings.push('注意: 稼働車両数に対して利用者が少ないため、1名乗車になる車両があります');
     }
 
     const built = buildTwoPhaseAssignment(activeCars, ridingKids);
     if (built.overflowedCars.length > 0) {
-      alert(`${built.overflowedCars.map(n => `「${n}」`).join('、')}の定員を超えて指定されています。\nあふれた分は自動配車に回します。`);
+      alert(`${built.overflowedCars.map(n => `「${n}」`).join('、')}の定員を超えて指定されています。\nあふれた分は自動割り当てに回します。`);
     }
     if (built.leftover.length > 0) {
       presentCarpoolFailure({ leftoverKids: built.leftover });
@@ -718,80 +751,62 @@ function generateCarpool() {
     return (riders && riders.length > 0) || companionSeatsOf(car) > 0;
   }
 
-  /** LINE用: 選手・選手同乗・車両同乗の名前を順にフラット化（注記なし） */
-  function buildLineNameList(car, riders) {
-    const names = [];
-    (riders || []).forEach(k => {
-      names.push(k.name);
-      childCompanionsOf(k).forEach(c => {
-        names.push(c.label);
-      });
-    });
-    companionsOf(car).forEach(c => {
-      names.push(c.label);
-    });
-    return names;
+  function formatPassengerPlanLine(kid, carName) {
+    const pinned = kid.fixedCar && carName && kid.fixedCar === carName ? '📌' : '';
+    const group = planClassLabel(kid);
+    const groupText = group ? ` (${group})` : '';
+    const tags = planCareTags(kid);
+    const tagText = tags.length ? ` [${tags.join('、')}]` : '';
+    const comps = childCompanionsOf(kid);
+    const companion = comps.length ? ` / 同乗: ${comps.map((c) => c.label).join('、')}` : '';
+    return `利用者: ${pinned}${kid.name}${groupText}${tagText}${companion}`;
   }
 
-  // 画面用テキスト（📌あり／同乗は名前列挙）
-  function buildScreenPlanText() {
-    let hasMotionSick = ridingKids.some(k => k.motionSick);
-    let hasPinned = ridingKids.some(k => k.fixedCar && activeCars.some(c => c.name === k.fixedCar));
-    let text = `【連絡】本日の配車です🚗\n---------------------\n`;
+  function buildDispatchPlanText() {
+    let text = `本日の送迎割り当て表\n---------------------\n`;
 
-    if (ridingKids.length > 0 || activeCars.some(c => companionSeatsOf(c) > 0)) {
-      activeCars.forEach(c => {
+    if (ridingKids.length > 0 || activeCars.some((c) => companionSeatsOf(c) > 0)) {
+      activeCars.forEach((c) => {
         const riders = assignments[c.name] || [];
-        const riderNames = riders.map(k => formatRiderLabel(k, c.name, { showPin: true }));
-        const companionNames = companionsOf(c).map(x => x.label);
-        const names = [...riderNames, ...companionNames].join('、');
-        const equipTag = c.isEquipmentCar ? ' 【道具車📦】' : '';
-        text += `■ ${c.name}${formatCarCompanionHeader(c)}${equipTag}\n  乗車: ${names || 'なし'}\n\n`;
+        const special = isSpecialPlanVehicle(c) ? '【特殊・大型・リフト車】' : '';
+        text += `■ ${c.name}${formatCarCompanionHeader(c)}${special ? ' ' + special : ''}\n`;
+        if (!riders.length && companionsOf(c).length === 0) {
+          text += '  乗車: なし\n\n';
+          return;
+        }
+        riders.forEach((kid) => {
+          text += `  ${formatPassengerPlanLine(kid, c.name)}\n`;
+        });
+        const vehicleCompanions = companionsOf(c).map((item) => item.label).filter(Boolean);
+        if (vehicleCompanions.length) {
+          text += `  車両同乗: ${vehicleCompanions.join('、')}\n`;
+        }
+        text += '\n';
       });
     } else {
-      text += "本日の乗車配車はありません。\n\n";
+      text += '本日の送迎割り当てはありません。\n\n';
     }
 
     if (onSiteKids.length > 0) {
-      text += `【現地集合】${onSiteKids.map(k => k.name).join('、')}\n\n`;
+      text += `【現地集合】\n${onSiteKids.map((kid) => `利用者: ${kid.name}${planClassLabel(kid) ? ` (${planClassLabel(kid)})` : ''}`).join('\n')}\n\n`;
     }
 
-    if (hasPinned) {
-      text += "※「📌」は事前指定で固定した乗車です。\n";
+    if (ridingKids.some((kid) => kid.fixedCar && activeCars.some((car) => car.name === kid.fixedCar))) {
+      text += '※「📌」は当日指定で固定した乗車です。\n';
     }
-    if (hasMotionSick) {
-      text += "※「🤢」マークの選手は助手席または前寄りの座席をお願いします。\n";
-    }
-    text += "---------------------\nよろしくお願いいたします！";
-    return text;
-  }
-
-  // LINE用テキスト（1台1行の横並び・注記なし。車両見出しのみ【道具車】可）
-  function buildLinePlanText() {
-    let text = `【連絡】本日の配車です🚗\n---------------------\n`;
-
-    if (ridingKids.length > 0 || activeCars.some(c => companionSeatsOf(c) > 0)) {
-      activeCars.forEach(c => {
-        const riders = assignments[c.name] || [];
-        const names = buildLineNameList(c, riders);
-        const equipTag = c.isEquipmentCar ? ' 【道具車】' : '';
-        text += `■ ${c.name}${formatCarCompanionHeader(c)}${equipTag}\n`;
-        text += `${names.length > 0 ? names.join('、') : 'なし'}\n\n`;
+    if (lastAssignmentWarnings.length) {
+      text += '【注意】\n';
+      lastAssignmentWarnings.forEach((warning) => {
+        text += `・${String(warning).replace(/^注意:\s*/, '')}\n`;
       });
-    } else {
-      text += "本日の乗車配車はありません。\n\n";
+      text += '\n';
     }
-
-    if (onSiteKids.length > 0) {
-      text += `【現地集合】\n${onSiteKids.map(k => k.name).join('、')}\n\n`;
-    }
-
-    text += "---------------------\nよろしくお願いいたします！";
+    text += '---------------------\nよろしくお願いいたします。';
     return text;
   }
 
-  const screenText = buildScreenPlanText();
-  lastGeneratedPlan = buildLinePlanText();
+  const screenText = buildDispatchPlanText();
+  lastGeneratedPlan = screenText;
   renderAssignmentWarnings(lastAssignmentWarnings);
   document.getElementById('resultText').innerText = screenText;
   document.getElementById('resultCard').style.display = 'block';

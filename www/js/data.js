@@ -1,9 +1,9 @@
 (function (global) {
 function createDefaultCars() {
   return [
-    { id: 1, name: '佐藤号', capacity: 3, active: true, companions: [], isEquipmentCar: false },
-    { id: 2, name: '鈴木号', capacity: 3, active: true, companions: [], isEquipmentCar: false },
-    { id: 3, name: '田中号(荷物車)', capacity: 2, active: true, companions: [], isEquipmentCar: false }
+    { id: 1, name: '1号車', capacity: 4, active: true, companions: [], isEquipmentCar: false },
+    { id: 2, name: '2号車', capacity: 4, active: true, companions: [], isEquipmentCar: false },
+    { id: 3, name: 'リフト車', capacity: 2, active: true, companions: [], isEquipmentCar: true }
   ];
 }
 
@@ -17,8 +17,9 @@ function normalizeCompanion(item, fallbackId) {
   };
 }
 
-const DEFAULT_DRIVER_ROLES = ['父', '母', '祖父', '祖母', 'その他'];
-const DEFAULT_COMPANION_ROLES = ['父', '母', '兄', '弟', '妹'];
+const DEFAULT_DRIVER_ROLES = ['ドライバー', '職員', '添乗員', 'その他'];
+const DEFAULT_COMPANION_ROLES = ['職員', '添乗員', '看護師', '保護者', 'その他'];
+const LEGACY_FAMILY_ROLES = new Set(['父', '母', '祖父', '祖母', '兄', '弟', '姉', '妹', 'コーチ']);
 const DRIVER_ROLES_KEY = 'cp_driver_roles';
 const COMPANION_ROLES_KEY = 'cp_companion_roles';
 const ROLE_LABEL_MAX = 20;
@@ -43,6 +44,12 @@ function readRoleList(key, defaults) {
     const parsed = JSON.parse(raw);
     const list = sanitizeRoleList(parsed);
     if (!list) return defaults.slice();
+    const kept = list.filter((item) => !LEGACY_FAMILY_ROLES.has(item));
+    if (kept.length !== list.length) {
+      const next = kept.length ? kept : defaults.slice();
+      writeRoleList(key, next);
+      return next;
+    }
     return list;
   } catch (e) {
     return defaults.slice();
@@ -80,7 +87,7 @@ function resetRoleLabels() {
 
 function normalizeDriverRole(value) {
   const role = typeof value === 'string' ? value.trim() : '';
-  if (!role) return '父';
+  if (!role || LEGACY_FAMILY_ROLES.has(role)) return 'ドライバー';
   return role.slice(0, ROLE_LABEL_MAX);
 }
 
@@ -214,12 +221,12 @@ function familySeatsOf(car) {
 
 function createDefaultChildren() {
   return [
-    { id: 1, name: 'ゆうと', grade: 6, pos: '投手', parentCar: '佐藤号', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 2, name: 'そうた', grade: 6, pos: '捕手', parentCar: '鈴木号', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 3, name: 'れん', grade: 5, pos: '内野', parentCar: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 4, name: 'はると', grade: 5, pos: '外野', parentCar: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 5, name: 'こうき', grade: 4, pos: '内野', parentCar: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
-    { id: 6, name: '大和', grade: 3, pos: '外野', parentCar: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} }
+    { id: 1, name: 'ゆうと', groupClass: '小学部', grade: '小学部', careTags: ['見守り'], pos: '', parentCar: '1号車', fixedVehicle: '1号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
+    { id: 2, name: 'そうた', groupClass: '小学部', grade: '小学部', careTags: [], pos: '', parentCar: '2号車', fixedVehicle: '2号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
+    { id: 3, name: 'れん', groupClass: 'A組', grade: 'A組', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
+    { id: 4, name: 'はると', groupClass: 'A組', grade: 'A組', careTags: ['車椅子'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
+    { id: 5, name: 'こうき', groupClass: 'デイ', grade: 'デイ', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} },
+    { id: 6, name: '大和', groupClass: 'デイ', grade: 'デイ', careTags: ['見守り'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {} }
   ];
 }
 
@@ -233,7 +240,7 @@ function normalizeChildCompanions(child) {
 
   // 旧 guardianRide / guardianName（1人）からの移行
   if (!meetOnSite && child.guardianRide) {
-    const label = (typeof child.guardianName === 'string' ? child.guardianName : '').trim() || '母';
+    const label = (typeof child.guardianName === 'string' ? child.guardianName : '').trim() || '保護者';
     return [{ id: `legacy-guardian-${child.id}`, label: label }];
   }
   return [];
@@ -291,7 +298,8 @@ function formatRiderLabel(child, carName, options) {
 }
 
 function autoFixedLabel(child) {
-  if (child && child.parentCar) return `自動（親:${child.parentCar}）`;
+  const name = child && (child.fixedVehicle || child.parentCar);
+  if (name) return `自動（拘束:${name}）`;
   return '自動（指定なし）';
 }
 
@@ -488,7 +496,7 @@ function manualSave() {
  * 選手/車両マスタと rideHistory・lastCar は保持。
  */
 function resetTodaySession() {
-  const msg = '出欠・同乗・指定枠を初期化して、次回の配車を開始しますか？\n（選手・車両リストと配車履歴は消えません）';
+  const msg = '出欠・同乗・指定枠を初期化して、次回の運行を開始しますか？\n（利用者・車両リストと運行履歴は消えません）';
   if (!confirm(msg)) return;
 
   cars.forEach(c => {
@@ -611,9 +619,9 @@ async function shareDispatchText(text) {
   }
 
   const shareOpts = {
-    title: '配車表',
+    title: '運行計画',
     text: payload,
-    dialogTitle: '配車表を共有'
+    dialogTitle: '運行計画テキストをコピー'
   };
 
   const CapShare = (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.Plugins)
@@ -710,15 +718,13 @@ function restoreBackupData(text) {
 
 /* 一括進級機能 */
 function promoteAllGrades() {
-  if (confirm("全選手の学年を1つ繰り上げますか？\n（現在6年生の選手はチェックが外れて卒団扱いになります）")) {
+  if (confirm('全員の区分表記を確認しますか？\n自由記述の区分は自動では繰り上がりません。数値だけの区分だけ +1 します。')) {
     children.forEach(c => {
-      if (c.grade < 6) {
-        c.grade += 1;
-      } else {
-        c.active = false;
-        c.meetOnSite = false;
-        c.companions = [];
-        c.fixedCar = '';
+      const text = c.grade == null ? '' : String(c.grade).trim();
+      const n = parseInt(text, 10);
+      if (text !== '' && String(n) === text && n < 12) {
+        c.grade = n + 1;
+        if (c.groupClass == null || String(c.groupClass).trim() === text) c.groupClass = c.grade;
       }
     });
     saveData();
