@@ -49,6 +49,8 @@ const CLICK_ACTIONS = new Set([
   'toggle-section',
   'open-child-companion',
   'open-tutorial',
+  'toggle-place-picker',
+  'search-place',
   'close-tutorial',
   'tutorial-next',
   'tutorial-prev',
@@ -183,6 +185,12 @@ function runClickAction(target) {
       break;
     case 'open-tutorial':
       openTutorialModal({ reset: true });
+      break;
+    case 'toggle-place-picker':
+      togglePlacePicker(target.dataset.scope || 'edit');
+      break;
+    case 'search-place':
+      searchPlace(target.dataset.scope || 'edit');
       break;
     case 'toggle-role-master':
       toggleRoleMaster();

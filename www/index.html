@@ -10,7 +10,9 @@
 <meta name="apple-mobile-web-app-title" content="送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029i">
+<link rel="stylesheet" href="css/style.css?v=20261029m">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -126,6 +128,18 @@
           <span>住所</span>
           <input type="text" id="newChildAddress" placeholder="例: 山口県下関市○○町1-2-3" maxlength="120" aria-label="住所">
         </label>
+        <div class="add-field">
+          <button type="button" class="btn btn-outline place-toggle" data-action="toggle-place-picker" data-scope="new">地図を開いて位置を指定</button>
+          <div id="newPlacePicker" class="place-picker" hidden>
+            <div class="place-picker-search">
+              <input type="text" id="newPlaceSearch" maxlength="120" placeholder="住所を検索" aria-label="住所検索">
+              <button type="button" class="btn btn-secondary" data-action="search-place" data-scope="new">検索</button>
+            </div>
+            <input type="text" id="newPlaceLink" class="place-link-input" placeholder="GoogleマップのURLを貼り付け" aria-label="GoogleマップURL貼り付け">
+            <div id="newPickerMap" class="place-map" role="application" aria-label="位置を指定する地図"></div>
+            <p id="newPlaceNote" class="place-picker-note"></p>
+          </div>
+        </div>
         <label class="add-field">
           <span>緯度（任意）</span>
           <input type="number" id="newChildLat" placeholder="33.9620" step="0.0001" aria-label="緯度">
@@ -348,6 +362,16 @@
     <div class="modal-field">
       <label for="editChildAddress">住所</label>
       <input type="text" id="editChildAddress" maxlength="120" placeholder="例: 山口県下関市○○町1-2-3">
+      <button type="button" class="btn btn-outline place-toggle" data-action="toggle-place-picker" data-scope="edit">地図を開いて位置を指定</button>
+      <div id="editPlacePicker" class="place-picker" hidden>
+        <div class="place-picker-search">
+          <input type="text" id="editPlaceSearch" maxlength="120" placeholder="住所を検索" aria-label="住所検索">
+          <button type="button" class="btn btn-secondary" data-action="search-place" data-scope="edit">検索</button>
+        </div>
+        <input type="text" id="editPlaceLink" class="place-link-input" placeholder="GoogleマップのURLを貼り付け" aria-label="GoogleマップURL貼り付け">
+        <div id="pickerMap" class="place-map" role="application" aria-label="位置を指定する地図"></div>
+        <p id="editPlaceNote" class="place-picker-note"></p>
+      </div>
     </div>
     <div class="modal-field modal-field-coords">
       <label for="editChildLat">緯度（任意）</label>
@@ -381,11 +405,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029i"></script>
-<script src="js/ui.js?v=20261029i"></script>
-<script src="js/carpool.js?v=20261029i"></script>
-<script src="js/route.js?v=20261029i"></script>
-<script src="js/app.js?v=20261029i"></script>
+<script src="js/data.js?v=20261029m"></script>
+<script src="js/ui.js?v=20261029m"></script>
+<script src="js/carpool.js?v=20261029m"></script>
+<script src="js/route.js?v=20261029m"></script>
+<script src="js/app.js?v=20261029m"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

@@ -1741,6 +1741,393 @@ function deleteChild(id) {
   }
 }
 
+/* 地図ピッカー（Leaflet + 国土地理院。有料の地図APIは使わない） */
+const placeMaps = { edit: null, new: null };
+const placeSeq = { edit: 0, new: 0 };
+let leafletIconsReady = false;
+let gsiMuniPromise = null;
+
+function placeDom(scope) {
+  const edit = scope === 'edit';
+  return {
+    panel: document.getElementById(edit ? 'editPlacePicker' : 'newPlacePicker'),
+    map: document.getElementById(edit ? 'pickerMap' : 'newPickerMap'),
+    search: document.getElementById(edit ? 'editPlaceSearch' : 'newPlaceSearch'),
+    link: document.getElementById(edit ? 'editPlaceLink' : 'newPlaceLink'),
+    note: document.getElementById(edit ? 'editPlaceNote' : 'newPlaceNote'),
+    address: document.getElementById(edit ? 'editChildAddress' : 'newChildAddress'),
+    lat: document.getElementById(edit ? 'editChildLat' : 'newChildLat'),
+    lng: document.getElementById(edit ? 'editChildLng' : 'newChildLng'),
+    toggle: document.querySelector(`[data-action="toggle-place-picker"][data-scope="${scope}"]`)
+  };
+}
+
+function setPlaceNote(scope, text) {
+  const note = placeDom(scope).note;
+  if (note) note.textContent = text || '';
+}
+
+function roundCoord4(value) {
+  return Math.round(Number(value) * 10000) / 10000;
+}
+
+function writeCoordInputs(scope, lat, lng) {
+  const dom = placeDom(scope);
+  if (dom.lat) dom.lat.value = Number.isFinite(lat) ? roundCoord4(lat).toFixed(4) : '';
+  if (dom.lng) dom.lng.value = Number.isFinite(lng) ? roundCoord4(lng).toFixed(4) : '';
+}
+
+function readCoordInputs(scope) {
+  const dom = placeDom(scope);
+  const lat = normalizeCoord(dom.lat ? dom.lat.value : '', -90, 90);
+  const lng = normalizeCoord(dom.lng ? dom.lng.value : '', -180, 180);
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+function placeCenter(scope) {
+  const current = readCoordInputs(scope);
+  if (current) return { lat: current.lat, lng: current.lng, zoom: 16 };
+  const facility = typeof getFacility === 'function' ? getFacility() : null;
+  if (facility && facility.lat != null && facility.lng != null) {
+    return { lat: Number(facility.lat), lng: Number(facility.lng), zoom: 14 };
+  }
+  return { lat: 33.9575, lng: 130.9415, zoom: 14 };
+}
+
+function placeMarkerIcon() {
+  if (typeof L === 'undefined') return null;
+  if (!leafletIconsReady) {
+    leafletIconsReady = L.icon({
+      iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+      shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
+    });
+  }
+  return leafletIconsReady;
+}
+
+function refreshMapSize(map) {
+  if (!map) return;
+  requestAnimationFrame(() => {
+    map.invalidateSize();
+    setTimeout(() => { if (map && map.invalidateSize) map.invalidateSize(); }, 120);
+  });
+}
+
+function destroyPlaceMap(scope) {
+  const current = placeMaps[scope];
+  if (current && current.map) current.map.remove();
+  placeMaps[scope] = null;
+  const el = placeDom(scope).map;
+  if (el) {
+    if (el._leaflet_id) delete el._leaflet_id;
+    el.innerHTML = '';
+  }
+}
+
+function ensurePlaceMarker(scope, lat, lng) {
+  const state = placeMaps[scope];
+  if (!state || !state.map || typeof L === 'undefined') return;
+  const ll = L.latLng(lat, lng);
+  if (!state.marker) {
+    state.marker = L.marker(ll, { draggable: true, autoPan: true, icon: placeMarkerIcon() }).addTo(state.map);
+    state.marker.on('drag', () => {
+      const point = state.marker.getLatLng();
+      writeCoordInputs(scope, point.lat, point.lng);
+    });
+    state.marker.on('dragend', () => {
+      const point = state.marker.getLatLng();
+      const lat4 = roundCoord4(point.lat);
+      const lng4 = roundCoord4(point.lng);
+      writeCoordInputs(scope, lat4, lng4);
+      reverseFillAddress(scope, lat4, lng4);
+    });
+  } else {
+    state.marker.setLatLng(ll);
+  }
+}
+
+function mountPlaceMap(scope) {
+  const dom = placeDom(scope);
+  if (!dom.map) return null;
+  if (typeof L === 'undefined') {
+    setPlaceNote(scope, '地図を読み込めませんでした。緯度と経度を直接入力できます。');
+    return null;
+  }
+  const existing = placeMaps[scope];
+  if (existing && existing.map && existing.map.getContainer() === dom.map) {
+    refreshMapSize(existing.map);
+    return existing;
+  }
+  destroyPlaceMap(scope);
+  placeMarkerIcon();
+  const center = placeCenter(scope);
+  const map = L.map(dom.map, { zoomControl: true }).setView([center.lat, center.lng], center.zoom);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  map.on('click', (event) => {
+    placePin(scope, event.latlng.lat, event.latlng.lng, { geocode: true, pan: false });
+  });
+  const state = { map, marker: null };
+  placeMaps[scope] = state;
+  const current = readCoordInputs(scope);
+  if (current) ensurePlaceMarker(scope, current.lat, current.lng);
+  refreshMapSize(map);
+  return state;
+}
+
+function placePin(scope, lat, lng, options) {
+  const opts = options || {};
+  const lat4 = roundCoord4(lat);
+  const lng4 = roundCoord4(lng);
+  if (!Number.isFinite(lat4) || !Number.isFinite(lng4)) return;
+  writeCoordInputs(scope, lat4, lng4);
+  const dom = placeDom(scope);
+  if (dom.panel && dom.panel.hidden) dom.panel.hidden = false;
+  const state = mountPlaceMap(scope);
+  if (state) {
+    ensurePlaceMarker(scope, lat4, lng4);
+    if (opts.pan !== false) state.map.setView([lat4, lng4], Math.max(state.map.getZoom(), 16));
+  }
+  if (opts.geocode) reverseFillAddress(scope, lat4, lng4);
+  if (opts.address) {
+    const addressEl = placeDom(scope).address;
+    if (addressEl && !addressEl.value.trim()) addressEl.value = String(opts.address).slice(0, 120);
+  }
+}
+
+function syncPinFromInputs(scope) {
+  const current = readCoordInputs(scope);
+  if (!current || !placeMaps[scope]) return;
+  placePin(scope, current.lat, current.lng, { geocode: false, pan: true });
+}
+
+function parseMapsLink(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  let decoded = raw;
+  try { decoded = decodeURIComponent(raw); } catch (e) { decoded = raw; }
+  const patterns = [
+    /[?&]destination=(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/,
+    /@(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/,
+    /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
+    /[?&](?:q|query|ll|center)=(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/,
+    /\/(?:place|search)\/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/
+  ];
+  for (let i = 0; i < patterns.length; i += 1) {
+    const match = decoded.match(patterns[i]) || raw.match(patterns[i]);
+    if (!match) continue;
+    const lat = Number(match[1]);
+    const lng = Number(match[2]);
+    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) return { lat, lng };
+  }
+  return null;
+}
+
+function applyPlaceLink(scope) {
+  const link = placeDom(scope).link;
+  const raw = link ? link.value.trim() : '';
+  if (!raw) return;
+  const parsed = parseMapsLink(raw);
+  if (!parsed) {
+    if (/maps\.app\.goo\.gl|goo\.gl\//i.test(raw)) {
+      setPlaceNote(scope, '短縮URLには座標が含まれていません。開いたあとの長いURLを貼ってください。');
+    }
+    return;
+  }
+  const dom = placeDom(scope);
+  if (dom.panel) dom.panel.hidden = false;
+  syncPlaceToggleLabel(scope);
+  placePin(scope, parsed.lat, parsed.lng, { geocode: true, pan: true });
+  setPlaceNote(scope, 'リンクから位置を読み取りました。');
+}
+
+function loadGsiMuni() {
+  window.GSI = window.GSI || {};
+  if (window.GSI.MUNI_ARRAY && window.GSI.MUNI_ARRAY['35201']) return Promise.resolve();
+  window.GSI.MUNI_ARRAY = window.GSI.MUNI_ARRAY || {};
+  if (!gsiMuniPromise) {
+    gsiMuniPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://maps.gsi.go.jp/js/muni.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('muni'));
+      document.head.appendChild(script);
+    }).catch((err) => {
+      gsiMuniPromise = null;
+      throw err;
+    });
+  }
+  return gsiMuniPromise;
+}
+
+function formatGsiAddress(result) {
+  if (!result) return '';
+  const local = result.lv01Nm || '';
+  let pref = '';
+  let city = '';
+  const table = window.GSI && window.GSI.MUNI_ARRAY;
+  if (table && result.muniCd && table[result.muniCd]) {
+    const parts = String(table[result.muniCd]).split(',');
+    pref = parts[1] || '';
+    city = parts[3] || '';
+  }
+  return `${pref}${city}${local}`.trim();
+}
+
+async function reverseAddress(lat, lng) {
+  try {
+    const url = `https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.results) {
+        try { await loadGsiMuni(); } catch (e) { /* 市区町村名がなくても町名は使う */ }
+        const text = formatGsiAddress(data.results);
+        if (text) return text;
+      }
+    }
+  } catch (e) { /* Nominatim に任せる */ }
+  const nomi = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&accept-language=ja`;
+  const res = await fetch(nomi);
+  if (!res.ok) return '';
+  const body = await res.json();
+  return body && body.display_name ? String(body.display_name) : '';
+}
+
+async function geocodeAddress(query) {
+  const url = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(query)}`;
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const hit = Array.isArray(data) ? data[0] : null;
+      const pair = hit && hit.geometry && hit.geometry.coordinates;
+      if (pair && pair.length >= 2) {
+        return {
+          lng: Number(pair[0]),
+          lat: Number(pair[1]),
+          title: hit.properties && hit.properties.title ? hit.properties.title : ''
+        };
+      }
+    }
+  } catch (e) { /* Nominatim に任せる */ }
+  const nomi = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q=${encodeURIComponent(query)}`;
+  const res2 = await fetch(nomi);
+  if (!res2.ok) return null;
+  const list = await res2.json();
+  if (!Array.isArray(list) || !list[0]) return null;
+  return { lat: Number(list[0].lat), lng: Number(list[0].lon), title: list[0].display_name || '' };
+}
+
+function reverseFillAddress(scope, lat, lng) {
+  const seq = placeSeq[scope] + 1;
+  placeSeq[scope] = seq;
+  reverseAddress(lat, lng).then((address) => {
+    if (placeSeq[scope] !== seq) return;
+    if (!address) {
+      setPlaceNote(scope, '座標は入りました。住所の自動入力はできませんでした。');
+      return;
+    }
+    const addressEl = placeDom(scope).address;
+    if (addressEl) addressEl.value = String(address).slice(0, 120);
+    setPlaceNote(scope, '位置と住所を入れました。ピンをドラッグして微調整できます。');
+  }).catch(() => {
+    if (placeSeq[scope] !== seq) return;
+    setPlaceNote(scope, '座標は入りました。住所の自動入力はできませんでした。');
+  });
+}
+
+function syncPlaceToggleLabel(scope) {
+  const toggle = placeDom(scope).toggle;
+  const panel = placeDom(scope).panel;
+  if (!toggle || !panel) return;
+  toggle.textContent = panel.hidden ? '地図を開いて位置を指定' : '地図を閉じる';
+}
+
+function togglePlacePicker(scope) {
+  const panel = placeDom(scope).panel;
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  syncPlaceToggleLabel(scope);
+  if (panel.hidden) {
+    destroyPlaceMap(scope);
+    return;
+  }
+  mountPlaceMap(scope);
+}
+
+async function searchPlace(scope) {
+  const dom = placeDom(scope);
+  const query = (dom.search && dom.search.value.trim()) || (dom.address && dom.address.value.trim());
+  if (!query) {
+    setPlaceNote(scope, '検索する住所を入力してください。');
+    return;
+  }
+  if (dom.panel) dom.panel.hidden = false;
+  syncPlaceToggleLabel(scope);
+  mountPlaceMap(scope);
+  setPlaceNote(scope, '検索しています…');
+  try {
+    const hit = await geocodeAddress(query);
+    if (!hit || !Number.isFinite(hit.lat) || !Number.isFinite(hit.lng)) {
+      setPlaceNote(scope, 'その住所は見つかりませんでした。地図をタップして指定できます。');
+      return;
+    }
+    placePin(scope, hit.lat, hit.lng, { geocode: true, pan: true, address: hit.title || query });
+  } catch (e) {
+    setPlaceNote(scope, '検索できませんでした。地図をタップして指定できます。');
+  }
+}
+
+function resetPlacePicker(scope) {
+  const dom = placeDom(scope);
+  if (dom.search) dom.search.value = '';
+  if (dom.link) dom.link.value = '';
+  if (dom.note) dom.note.textContent = '';
+  if (dom.panel) dom.panel.hidden = true;
+  syncPlaceToggleLabel(scope);
+  destroyPlaceMap(scope);
+}
+
+function preparePlacePicker(scope) {
+  const dom = placeDom(scope);
+  if (dom.link) dom.link.value = '';
+  if (dom.search) dom.search.value = '';
+  if (dom.note) dom.note.textContent = '';
+  const current = readCoordInputs(scope);
+  if (current && dom.panel) {
+    dom.panel.hidden = false;
+    syncPlaceToggleLabel(scope);
+    mountPlaceMap(scope);
+    return;
+  }
+  resetPlacePicker(scope);
+}
+
+function bindPlacePickerFields() {
+  ['edit', 'new'].forEach((scope) => {
+    const dom = placeDom(scope);
+    if (dom.link) dom.link.addEventListener('input', () => applyPlaceLink(scope));
+    if (dom.search) {
+      dom.search.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        searchPlace(scope);
+      });
+    }
+    if (dom.lat) dom.lat.addEventListener('change', () => syncPinFromInputs(scope));
+    if (dom.lng) dom.lng.addEventListener('change', () => syncPinFromInputs(scope));
+  });
+}
+
 /* 編集機能 */
 function openEditModal(id) {
   const kid = children.find(x => x.id === id);
@@ -1758,8 +2145,8 @@ function openEditModal(id) {
   const latInput = document.getElementById('editChildLat');
   const lngInput = document.getElementById('editChildLng');
   if (addressInput) addressInput.value = kid.address || '';
-  if (latInput) latInput.value = kid.lat == null ? '' : String(kid.lat);
-  if (lngInput) lngInput.value = kid.lng == null ? '' : String(kid.lng);
+  if (latInput) latInput.value = kid.lat == null ? '' : roundCoord4(kid.lat).toFixed(4);
+  if (lngInput) lngInput.value = kid.lng == null ? '' : roundCoord4(kid.lng).toFixed(4);
   const fixedSelect = document.getElementById('editChildFixedCar');
   if (fixedSelect) {
     fixedSelect.innerHTML = buildFixedCarOptionsHtml(kid.fixedCar || '', kid);
@@ -1767,9 +2154,14 @@ function openEditModal(id) {
   const editModal = document.getElementById('editModal');
   editModal.classList.add('is-open');
   editModal.style.display = '';
+  preparePlacePicker('edit');
 }
 
 function closeEditModal() {
+  destroyPlaceMap('edit');
+  const panel = document.getElementById('editPlacePicker');
+  if (panel) panel.hidden = true;
+  syncPlaceToggleLabel('edit');
   const editModal = document.getElementById('editModal');
   editModal.classList.remove('is-open');
   editModal.style.display = '';
@@ -1902,6 +2294,7 @@ function addChild() {
     if (latInput) latInput.value = '';
     if (lngInput) lngInput.value = '';
     if (motionInput) motionInput.checked = false;
+    resetPlacePicker('new');
     renderCarePills('new');
     renderSchedulePills('new', WEEKDAY_KEYS.slice());
   } else {
@@ -2225,6 +2618,7 @@ function maybeShowTutorialOnLaunch() {
 }
 
 bindCarReorderGestures();
+bindPlacePickerFields();
 
 
   const HaishaUI = {
@@ -2304,6 +2698,8 @@ bindCarReorderGestures();
     toggleScheduleDay,
     togglePassengerDayStatus,
     runDispatchWithRoute,
+    togglePlacePicker,
+    searchPlace,
     setDepartureTime,
     setFacilityName,
     setFacilityCoord,

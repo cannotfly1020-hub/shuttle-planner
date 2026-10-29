@@ -905,6 +905,23 @@ input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px
 .route-address { color: #475569; font-size: 11px; padding-left: 9.2em; }
 .route-note { margin: 6px 0 0; font-size: 11px; color: #b45309; }
 .modal-box { max-height: 86vh; overflow: auto; }
+#editModal .modal-box { max-width: 440px; }
+.place-toggle { width: 100%; margin-top: 8px; }
+.place-picker { margin-top: 8px; }
+.place-picker[hidden] { display: none !important; }
+.place-picker-search { display: flex; gap: 6px; margin-bottom: 6px; }
+.place-picker-search input { flex: 1; min-width: 0; }
+.place-picker-search .btn { flex: 0 0 auto; margin: 0; min-height: 40px; }
+.place-link-input { width: 100%; margin-bottom: 6px; }
+.place-map {
+  height: 220px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+.place-map .leaflet-control-attribution { font-size: 10px; line-height: 1.2; }
+.place-picker-note { margin: 6px 0 0; min-height: 1.2em; font-size: 11px; color: #64748b; line-height: 1.4; }
 .modal-field-coords input { margin-bottom: 6px; }
 .result-warnings { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .result-warnings[hidden] { display: none; }
