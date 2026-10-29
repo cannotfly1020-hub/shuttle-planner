@@ -1,5 +1,5 @@
 (function (global) {
-/** 選手カードの同乗入力を開いている ID（再描画でも維持） */
+/** 利用者カードの同乗入力を開いている ID（再描画でも維持） */
 const openChildCompanionEditors = new Set();
 
 const CHILD_SORT_KEY = 'cp_child_sort';
@@ -12,7 +12,7 @@ const POS_ORDER = {
   '未定': 9, '': 9
 };
 
-/** 選手一覧の表示ソート（配列本体は破壊しない） */
+/** 利用者一覧の表示ソート（配列本体は破壊しない） */
 let childSortMode = 'default';
 
 function readChildSortMode() {
@@ -44,28 +44,217 @@ function positionSortScore(pos) {
   return 9;
 }
 
+function textOrEmpty(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+function listFromUnknown(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => textOrEmpty(item)).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split(/[,、]/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+const LEGACY_POSITION_LABELS = new Set([
+  '投手', 'ピッチャー', 'P',
+  '捕手', 'キャッチャー', 'C',
+  '内野', '内野手',
+  '外野', '外野手',
+  '未定'
+]);
+
+function isLegacyPositionLabel(value) {
+  return LEGACY_POSITION_LABELS.has(textOrEmpty(value));
+}
+
+function comparePersonName(a, b) {
+  return textOrEmpty(a && a.name).localeCompare(textOrEmpty(b && b.name), 'ja');
+}
+
+/** 区分/クラス。未設定なら旧 grade */
+function passengerGroupClass(passenger) {
+  if (!passenger || typeof passenger !== 'object') return '';
+  const next = textOrEmpty(passenger.groupClass);
+  if (next) return passenger.groupClass;
+  if (passenger.grade != null && textOrEmpty(passenger.grade)) return passenger.grade;
+  return '';
+}
+
+function formatGroupClassLabel(passenger) {
+  const text = textOrEmpty(passengerGroupClass(passenger));
+  if (!text) return '';
+  if (/^\d+$/.test(text)) return `${text}年`;
+  return text;
+}
+
+function groupClassSortNumber(passenger) {
+  const text = textOrEmpty(passengerGroupClass(passenger));
+  if (!text) return 0;
+  const n = parseInt(text, 10);
+  if (!Number.isNaN(n) && String(n) === text) return n;
+  return 0;
+}
+
+/** careTags を優先し、無ければ positions。旧ポジション名は除く */
+function explicitCareTags(passenger) {
+  if (!passenger || typeof passenger !== 'object') return [];
+  const primary = listFromUnknown(passenger.careTags);
+  const source = primary.length ? primary : listFromUnknown(passenger.positions);
+  return source.filter((tag) => !isLegacyPositionLabel(tag));
+}
+
+/**
+ * 表示用の要配慮タグ。motionSick は「車酔い配慮」として補う。
+ */
+function passengerCareTags(passenger) {
+  if (!passenger || typeof passenger !== 'object') return [];
+  const tags = explicitCareTags(passenger).slice();
+  if (passenger.motionSick && !tags.some((tag) => tag.indexOf('酔') !== -1)) {
+    tags.push('車酔い配慮');
+  }
+  const seen = new Set();
+  return tags.filter((tag) => {
+    if (seen.has(tag)) return false;
+    seen.add(tag);
+    return true;
+  });
+}
+
+function careTagBadgeClass(tag) {
+  const text = textOrEmpty(tag);
+  if (text.indexOf('酔') !== -1) return 'badge-motion';
+  if (text.indexOf('車椅') !== -1 || text.indexOf('単独') !== -1) return 'badge-fixed';
+  return 'badge';
+}
+
+function legacyPositionLabel(passenger) {
+  if (!passenger || typeof passenger !== 'object') return '';
+  const pos = textOrEmpty(passenger.pos);
+  if (pos) return pos;
+  const positions = listFromUnknown(passenger.positions);
+  return positions[0] || '';
+}
+
+function careTagSortKey(passenger) {
+  return explicitCareTags(passenger).join('\u0000');
+}
+
+/** 固定車両指定。未設定なら旧 parentCar */
+function passengerFixedVehicleName(passenger) {
+  if (!passenger || typeof passenger !== 'object') return '';
+  const next = textOrEmpty(passenger.fixedVehicle);
+  const legacy = textOrEmpty(passenger.parentCar);
+  if (next && legacy && next !== legacy && typeof cars !== 'undefined' && Array.isArray(cars)) {
+    const names = cars.map((car) => (car && car.name) || '');
+    if (names.indexOf(legacy) !== -1 && names.indexOf(next) === -1) return legacy;
+  }
+  return next || legacy || '';
+}
+
+function applyGroupClass(passenger, raw) {
+  if (!passenger) return;
+  const text = textOrEmpty(raw);
+  passenger.groupClass = text;
+  const n = parseInt(text, 10);
+  passenger.grade = text !== '' && String(n) === text ? n : text;
+}
+
+function applyFixedVehicle(passenger, name) {
+  if (!passenger) return;
+  const value = textOrEmpty(name);
+  passenger.fixedVehicle = value;
+  passenger.parentCar = value;
+}
+
+function applyLegacyPositionField(passenger, raw) {
+  if (!passenger) return;
+  const pos = textOrEmpty(raw) || '未定';
+  passenger.pos = pos;
+  passenger.positions = pos && pos !== '未定' ? [pos] : [];
+  if (!isLegacyPositionLabel(pos)) {
+    const kept = listFromUnknown(passenger.careTags).filter((tag) => tag.indexOf('酔') === -1);
+    passenger.careTags = kept.concat([pos]);
+  }
+}
+
+function syncMotionCareTag(passenger) {
+  if (!passenger) return;
+  const tags = explicitCareTags(passenger).filter((tag) => tag.indexOf('酔') === -1);
+  if (passenger.motionSick) tags.push('車酔い配慮');
+  passenger.careTags = tags;
+}
+
+/** 特殊・大型車両。未設定なら旧 isEquipmentCar */
+function vehicleIsSpecial(vehicle) {
+  if (!vehicle || typeof vehicle !== 'object') return false;
+  if (vehicle.isSpecialVehicle != null && vehicle.isSpecialVehicle !== '') return !!vehicle.isSpecialVehicle;
+  return !!vehicle.isEquipmentCar;
+}
+
+function applySpecialVehicle(vehicle, checked) {
+  if (!vehicle) return;
+  const next = !!checked;
+  vehicle.isSpecialVehicle = next;
+  vehicle.isEquipmentCar = next;
+}
+
+/** 運転者。driverRole を優先し、旧 driver にフォールバック */
+function vehicleDriverLabel(vehicle) {
+  if (!vehicle || typeof vehicle !== 'object') return '';
+  const role = textOrEmpty(vehicle.driverRole);
+  if (role) return role;
+  return textOrEmpty(vehicle.driver);
+}
+
+function fixedVehicleAutoLabel(passenger) {
+  const name = passengerFixedVehicleName(passenger);
+  if (name) return `自動（固定:${name}）`;
+  return '自動（指定なし）';
+}
+
+function buildCareTagBadgesHtml(passenger) {
+  return passengerCareTags(passenger).map((tag) => {
+    const safe = escapeRoleText(tag);
+    return `<span class="badge ${careTagBadgeClass(tag)} badge-care" title="要配慮">${safe}</span>`;
+  }).join('');
+}
+
 function compareChildrenForSort(a, b, mode) {
   if (mode === 'kana') {
-    return a.name.localeCompare(b.name, 'ja');
+    return comparePersonName(a, b);
   }
   if (mode === 'grade') {
-    const ga = parseInt(a.grade, 10) || 0;
-    const gb = parseInt(b.grade, 10) || 0;
+    const ga = groupClassSortNumber(a);
+    const gb = groupClassSortNumber(b);
     if (gb !== ga) return gb - ga;
-    return a.name.localeCompare(b.name, 'ja');
+    const la = textOrEmpty(passengerGroupClass(a));
+    const lb = textOrEmpty(passengerGroupClass(b));
+    if (la !== lb) return la.localeCompare(lb, 'ja');
+    return comparePersonName(a, b);
   }
   if (mode === 'position') {
-    const pa = positionSortScore(a.pos);
-    const pb = positionSortScore(b.pos);
+    const ta = careTagSortKey(a);
+    const tb = careTagSortKey(b);
+    if (ta !== tb) {
+      if (!ta) return 1;
+      if (!tb) return -1;
+      return ta.localeCompare(tb, 'ja');
+    }
+    const pa = positionSortScore(legacyPositionLabel(a));
+    const pb = positionSortScore(legacyPositionLabel(b));
     if (pa !== pb) return pa - pb;
-    const ga = parseInt(a.grade, 10) || 0;
-    const gb = parseInt(b.grade, 10) || 0;
+    const ga = groupClassSortNumber(a);
+    const gb = groupClassSortNumber(b);
     if (gb !== ga) return gb - ga;
-    return a.name.localeCompare(b.name, 'ja');
+    return comparePersonName(a, b);
   }
   // default: 登録順（id 昇順、同値なら配列安定のため 0）
-  const ia = Number(a.id) || 0;
-  const ib = Number(b.id) || 0;
+  const ia = Number(a && a.id) || 0;
+  const ib = Number(b && b.id) || 0;
   if (ia !== ib) return ia - ib;
   return 0;
 }
@@ -121,7 +310,7 @@ function getSortedCarsForRender() {
   const mode = CAR_SORT_MODES.has(carSortMode) ? carSortMode : 'default';
   const list = [...cars];
   if (mode === 'kana') {
-    list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    list.sort((a, b) => comparePersonName(a, b));
   }
   return list;
 }
@@ -396,7 +585,7 @@ function updatePanelSummaries(activeCarsList, activeSeats, seatDemand, activeKid
     carsSummary.hidden = false;
   }
   if (childrenSummary) {
-    childrenSummary.textContent = `参加 ${kidCount}名`;
+    childrenSummary.textContent = `利用 ${kidCount}名`;
     childrenSummary.hidden = false;
   }
 }
@@ -438,7 +627,7 @@ function updateStatusBar() {
 }
 
 function buildFixedCarOptionsHtml(selected, child) {
-  let html = `<option value="">${autoFixedLabel(child || {})}</option>`;
+  let html = `<option value="">${fixedVehicleAutoLabel(child || {})}</option>`;
   const activeCars = cars.filter(c => c.active);
   activeCars.forEach(c => {
     html += `<option value="${c.name}" ${selected === c.name ? 'selected' : ''}>${c.name}</option>`;
@@ -456,7 +645,7 @@ function updateCarSelectOptions() {
   if (!addSelect) return;
 
   let currentAddVal = addSelect.value;
-  addSelect.innerHTML = '<option value="">親の車: なし</option>';
+  addSelect.innerHTML = '<option value="">固定車両: なし</option>';
   cars.forEach(c => {
     addSelect.innerHTML += `<option value="${c.name}">${c.name}</option>`;
   });
@@ -464,7 +653,7 @@ function updateCarSelectOptions() {
 
   if (editSelect) {
     let currentEditVal = editSelect.value;
-    editSelect.innerHTML = '<option value="">親の車: なし</option>';
+    editSelect.innerHTML = '<option value="">固定車両: なし</option>';
     cars.forEach(c => {
       editSelect.innerHTML += `<option value="${c.name}">${c.name}</option>`;
     });
@@ -502,7 +691,7 @@ function escapeRoleText(value) {
  * 運転者が空で同乗者もいなければ空文字（「佐藤号」のまま）。
  */
 function formatCarCompanionHeader(car) {
-  const role = car && typeof car.driverRole === 'string' ? car.driverRole.trim() : '';
+  const role = vehicleDriverLabel(car);
   const companions = companionsOf(car)
     .map((item) => (item && item.label ? String(item.label).trim() : ''))
     .filter((label) => label && label !== role);
@@ -513,7 +702,7 @@ function formatCarCompanionHeader(car) {
 
 function buildDriverSelectHtml(car) {
   const roles = getDriverRoles();
-  const current = car && typeof car.driverRole === 'string' ? car.driverRole.trim() : '';
+  const current = vehicleDriverLabel(car);
   const options = roles.slice();
   if (current && options.indexOf(current) === -1) options.unshift(current);
   if (!options.length) options.push(current || '父');
@@ -667,13 +856,14 @@ function renderCars() {
     const isLast = orderIndex < 0 || orderIndex >= cars.length - 1;
 
     const safeName = String(car.name || '').replace(/"/g, '&quot;');
-    const equipBadge = car.isEquipmentCar ? `<span class="equipment-badge" title="道具車">📦 道具車</span>` : '';
+    const specialVehicle = vehicleIsSpecial(car);
+    const equipBadge = specialVehicle ? `<span class="equipment-badge" title="特殊・大型車両">🚐 特殊・大型</span>` : '';
     const periodDays = getDispatchPeriod();
     const periodLabel = periodDays === 30 ? '1ヶ月' : periodDays === 90 ? '3ヶ月' : periodDays === 180 ? '半年' : `${periodDays}日`;
     const dispatchCount = getCarDispatchCount(car, periodDays);
     const dispatchBadge = `<span class="badge-dispatch" title="過去${periodDays}日間の出動回数">直近${periodLabel}: ${dispatchCount}回</span>`;
     list.innerHTML += `
-      <div class="car-card ${inactiveClass}${car.isEquipmentCar ? ' is-equipment' : ''}" data-car-id="${car.id}">
+      <div class="car-card ${inactiveClass}${specialVehicle ? ' is-equipment is-special' : ''}" data-car-id="${car.id}">
         <div class="car-card-header">
           <label class="car-name-label">
             <input type="checkbox" data-action="toggle-car" data-id="${car.id}" ${car.active ? 'checked' : ''}>
@@ -696,8 +886,8 @@ function renderCars() {
 
         <div class="car-meta-row">
           <label class="car-equipment-label">
-            <input type="checkbox" class="car-equipment-checkbox" data-action="toggle-equipment" data-id="${car.id}" data-car-id="${car.id}" ${car.isEquipmentCar ? 'checked' : ''}>
-            道具車
+            <input type="checkbox" class="car-equipment-checkbox" data-action="toggle-equipment" data-id="${car.id}" data-car-id="${car.id}" ${specialVehicle ? 'checked' : ''}>
+            特殊・大型車両
           </label>
         </div>
 
@@ -742,6 +932,10 @@ function renderChildren() {
     const editorOpen = mode === 'ride' && openChildCompanionEditors.has(Number(c.id));
     const chipsHtml = buildChildCompanionChipsHtml(c);
 
+    const groupLabel = formatGroupClassLabel(c);
+    const fixedVehicleName = passengerFixedVehicleName(c);
+    const careBadges = buildCareTagBadgesHtml(c);
+
     list.innerHTML += `
       <div class="item-row item-row-child">
         <div class="item-main">
@@ -756,11 +950,11 @@ function renderChildren() {
             ${mode === 'ride' && !editorOpen ? `
               <button type="button" class="btn-add-companion" data-action="open-child-companion" data-id="${c.id}">＋同乗</button>
             ` : ''}
-            <span class="badge-sub">${c.grade ? c.grade + '年' : ''}</span>
-            ${c.motionSick ? `<span class="badge-motion">🤢酔い</span>` : ''}
-            ${c.parentCar ? `<span class="badge">親:${c.parentCar}</span>` : ''}
+            ${groupLabel ? `<span class="badge-sub">${escapeRoleText(groupLabel)}</span>` : ''}
+            ${careBadges}
+            ${fixedVehicleName ? `<span class="badge">固定:${escapeRoleText(fixedVehicleName)}</span>` : ''}
             ${mode === 'site' ? `<span class="badge-site">現地</span>` : ''}
-            ${c.fixedCar && mode === 'ride' ? `<span class="badge-fixed">📌${c.fixedCar}</span>` : ''}
+            ${c.fixedCar && mode === 'ride' ? `<span class="badge-fixed">📌${escapeRoleText(c.fixedCar)}</span>` : ''}
           </div>
           ${editorOpen ? `
             <div class="child-companion-editor">
@@ -813,7 +1007,7 @@ function updateCapacity(id, val) {
 function toggleEquipmentCar(id, checked) {
   const c = cars.find(x => String(x.id) === String(id));
   if (!c) return;
-  c.isEquipmentCar = typeof checked === 'boolean' ? checked : !c.isEquipmentCar;
+  applySpecialVehicle(c, typeof checked === 'boolean' ? checked : !vehicleIsSpecial(c));
   saveData();
   renderCars();
   updateStatusBar();
@@ -832,6 +1026,10 @@ function commitCarRename(id, newName) {
     return;
   }
   if (prev !== car.name) {
+    children.forEach((ch) => {
+      if (ch && ch.fixedVehicle === prev) ch.fixedVehicle = car.name;
+    });
+    saveData();
     refreshLists();
   }
 }
@@ -877,7 +1075,7 @@ function addChildCompanion(childId, label) {
 
   if (ch.fixedCar) {
     const car = cars.find(c => c.name === ch.fixedCar);
-    // 既存の選手＋同乗はすでに used に含まれているので、追加1席分だけ判定
+    // 既存の利用者＋同乗はすでに used に含まれているので、追加1席分だけ判定
     if (car && !canFitOnCar(car, 1)) {
       alert(`「${car.name}」の定員を超えるため、同乗者を追加できません。`);
       return;
@@ -950,6 +1148,7 @@ function deleteCar(id) {
     cars = cars.filter(x => x.id !== id);
     children.forEach(ch => {
       if (ch.parentCar === car.name) ch.parentCar = '';
+      if (ch.fixedVehicle === car.name) ch.fixedVehicle = '';
       if (ch.fixedCar === car.name) ch.fixedCar = '';
     });
     saveData();
@@ -974,11 +1173,11 @@ function openEditModal(id) {
   if (!kid) return;
   document.getElementById('editChildId').value = kid.id;
   document.getElementById('editChildName').value = kid.name;
-  document.getElementById('editChildGrade').value = kid.grade || 6;
-  document.getElementById('editChildPos').value = kid.pos || '未定';
+  document.getElementById('editChildGrade').value = passengerGroupClass(kid) || 6;
+  document.getElementById('editChildPos').value = legacyPositionLabel(kid) || '未定';
   document.getElementById('editChildMotionSick').checked = !!kid.motionSick;
   updateCarSelectOptions();
-  document.getElementById('editChildParentCar').value = kid.parentCar || '';
+  document.getElementById('editChildParentCar').value = passengerFixedVehicleName(kid);
   const fixedSelect = document.getElementById('editChildFixedCar');
   if (fixedSelect) {
     fixedSelect.innerHTML = buildFixedCarOptionsHtml(kid.fixedCar || '', kid);
@@ -999,10 +1198,11 @@ function saveEditChild() {
   const kid = children.find(x => x.id === id);
   if (kid) {
     kid.name = document.getElementById('editChildName').value.trim() || kid.name;
-    kid.grade = parseInt(document.getElementById('editChildGrade').value);
-    kid.pos = document.getElementById('editChildPos').value;
-    kid.parentCar = document.getElementById('editChildParentCar').value;
+    applyGroupClass(kid, document.getElementById('editChildGrade').value);
+    applyLegacyPositionField(kid, document.getElementById('editChildPos').value);
+    applyFixedVehicle(kid, document.getElementById('editChildParentCar').value);
     kid.motionSick = document.getElementById('editChildMotionSick').checked;
+    syncMotionCareTag(kid);
 
     const nextFixed = document.getElementById('editChildFixedCar').value || '';
     if (nextFixed) {
@@ -1029,7 +1229,7 @@ function sortCarsByName() {
   toggleCarSortMode();
 }
 
-/** @deprecated 互換: セレクトの学年順へ */
+/** @deprecated 互換: セレクトの区分/クラス順へ */
 function sortChildrenByGrade() {
   setChildSortMode('grade');
 }
@@ -1045,14 +1245,22 @@ function addCar() {
   const name = nameInput.value.trim();
   const cap = parseInt(capInput.value) || 3;
   if (name) {
-    cars.push(normalizeCar({ id: Date.now(), name: name, capacity: cap, active: true, companions: [], isEquipmentCar: false }));
+    cars.push(normalizeCar({
+      id: Date.now(),
+      name: name,
+      capacity: cap,
+      active: true,
+      companions: [],
+      isEquipmentCar: false,
+      isSpecialVehicle: false
+    }));
     renderCars();
     saveData();
     updateStatusBar();
     nameInput.value = '';
     capInput.value = '3';
   } else {
-    alert("車の名前を入力してください");
+    alert("車両名を入力してください");
   }
 }
 
@@ -1063,19 +1271,28 @@ function addChild() {
   const parentSelect = document.getElementById('newChildParentCar');
   const motionInput = document.getElementById('newChildMotionSick');
 
-  const name = nameInput.value.trim();
-  const grade = parseInt(gradeInput.value) || 6;
-  const pos = posInput.value;
-  const parent = parentSelect.value;
-  const motionSick = motionInput.checked;
+  const name = nameInput ? nameInput.value.trim() : '';
+  const gradeRaw = gradeInput ? gradeInput.value : '';
+  const gradeNumber = parseInt(gradeRaw, 10);
+  const grade = gradeRaw === '' || Number.isNaN(gradeNumber) ? (gradeRaw || 6) : gradeNumber;
+  const pos = posInput ? posInput.value : '';
+  const parent = parentSelect ? parentSelect.value : '';
+  const motionSick = !!(motionInput && motionInput.checked);
+  const careTags = [];
+  if (pos && !isLegacyPositionLabel(pos)) careTags.push(pos);
+  if (motionSick && careTags.indexOf('車酔い配慮') === -1) careTags.push('車酔い配慮');
 
   if (name) {
     children.push(normalizeChild({
       id: Date.now(),
       name: name,
       grade: grade,
+      groupClass: grade,
       pos: pos,
+      positions: pos && pos !== '未定' ? [pos] : [],
+      careTags: careTags,
       parentCar: parent,
+      fixedVehicle: parent,
       fixedCar: '',
       motionSick: motionSick,
       companions: [],
@@ -1086,11 +1303,11 @@ function addChild() {
     }));
     saveData();
     refreshLists();
-    nameInput.value = '';
-    parentSelect.value = '';
-    motionInput.checked = false;
+    if (nameInput) nameInput.value = '';
+    if (parentSelect) parentSelect.value = '';
+    if (motionInput) motionInput.checked = false;
   } else {
-    alert("選手の名前を入力してください");
+    alert("利用者の名前を入力してください");
   }
 }
 
