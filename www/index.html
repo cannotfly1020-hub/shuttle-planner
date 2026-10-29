@@ -3,20 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>shuttle-planner 送迎計画最適化</title>
+<title>shuttle-planner | 送迎計画・運行最適化</title>
 <meta name="theme-color" content="#1e3a8a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="送迎">
+<meta name="apple-mobile-web-app-title" content="shuttle-planner 送迎管理">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029n">
+<link rel="stylesheet" href="css/style.css?v=20261029p">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
-<h1 class="no-print">shuttle-planner 送迎計画最適化</h1>
+<h1 class="app-title no-print">shuttle-planner 送迎管理</h1>
+<p class="app-subtitle no-print">福祉・通所介護・スクール向け送迎最適化</p>
 
 <div class="service-date-bar quick-calendar no-print" id="serviceDateBar">
   <label class="service-date-label">
@@ -196,10 +197,11 @@
 <!-- 結果表示 -->
 <div class="card result-card" id="resultCard">
   <div class="print-header">
-    <h1>送迎運行指示書（本日の運行計画）</h1>
+    <h1 id="printPlanTitle">本日の送迎運行計画 - shuttle-planner</h1>
     <div class="meta-info">
       <div id="printServiceDate">運行日: </div>
       <div id="printCreatedMeta"></div>
+      <div id="printFacilityAddress"></div>
     </div>
   </div>
   <h2 class="card-heading no-print">本日の送迎運行計画</h2>
@@ -230,18 +232,37 @@
         <option value="180">直近半年 (180日)</option>
       </select>
     </label>
-    <label class="setting-item">
-      <span>施設名</span>
-      <input type="text" id="facilityNameInput" data-action="set-facility-name" maxlength="40" aria-label="施設名">
-    </label>
-    <label class="setting-item">
-      <span>施設の緯度</span>
-      <input type="number" id="facilityLatInput" data-action="set-facility-coord" data-coord="lat" step="0.0001" aria-label="施設の緯度">
-    </label>
-    <label class="setting-item">
-      <span>施設の経度</span>
-      <input type="number" id="facilityLngInput" data-action="set-facility-coord" data-coord="lng" step="0.0001" aria-label="施設の経度">
-    </label>
+    <div class="facility-place" id="facilityPlace">
+      <p class="settings-hint">事業所・施設情報（出発・帰還の基準地点）</p>
+      <label class="setting-item">
+        <span>施設名</span>
+        <input type="text" id="facilityNameInput" maxlength="40" aria-label="施設名" placeholder="例: ひまわり放課後デイ 本園">
+      </label>
+      <label class="setting-item">
+        <span>基準出発時刻</span>
+        <input type="time" id="facilityDepartureInput" aria-label="基準出発時刻">
+      </label>
+      <label class="setting-item">
+        <span>住所</span>
+        <input type="text" id="facilityAddressInput" maxlength="120" aria-label="施設の住所" placeholder="例: 山口県下関市細江新町">
+      </label>
+      <div class="place-picker-search">
+        <input type="text" id="facilityPlaceSearch" maxlength="120" placeholder="住所を入力して検索" aria-label="施設住所の検索">
+        <button type="button" class="btn btn-secondary" data-action="search-facility">検索</button>
+      </div>
+      <input type="text" id="facilityPlaceLink" class="place-link-input" placeholder="GoogleマップのURLを貼り付け" aria-label="施設のGoogleマップURL">
+      <div id="facilityPickerMap" class="place-map" role="application" aria-label="施設位置を指定する地図"></div>
+      <p id="facilityPlaceNote" class="place-picker-note"></p>
+      <label class="setting-item">
+        <span>緯度</span>
+        <input type="number" id="facilityLatInput" step="0.0001" aria-label="施設の緯度">
+      </label>
+      <label class="setting-item">
+        <span>経度</span>
+        <input type="number" id="facilityLngInput" step="0.0001" aria-label="施設の経度">
+      </label>
+      <button type="button" class="btn btn-primary" data-action="save-facility">施設位置を保存</button>
+    </div>
     <button type="button" class="btn btn-secondary btn-block" id="btnToggleRoleMaster" data-action="toggle-role-master" aria-expanded="false" aria-controls="roleMasterContainer">🏷️ スタッフ・ロール / 要配慮タグを編集 ▼</button>
     <div id="roleMasterContainer" class="role-master" hidden>
       <div class="master-tabs" role="tablist">
@@ -413,11 +434,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029n"></script>
-<script src="js/ui.js?v=20261029n"></script>
-<script src="js/carpool.js?v=20261029n"></script>
-<script src="js/route.js?v=20261029n"></script>
-<script src="js/app.js?v=20261029n"></script>
+<script src="js/data.js?v=20261029p"></script>
+<script src="js/ui.js?v=20261029p"></script>
+<script src="js/carpool.js?v=20261029p"></script>
+<script src="js/route.js?v=20261029p"></script>
+<script src="js/app.js?v=20261029p"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

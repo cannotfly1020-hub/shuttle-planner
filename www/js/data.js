@@ -34,6 +34,8 @@ const STORAGE_KEYS = {
 
 const DEFAULT_FACILITY = {
   name: 'ひまわり放課後デイ 施設',
+  address: '',
+  systemName: '',
   lat: 33.9575,
   lng: 130.9415,
   defaultDepartureTime: '14:30'
@@ -845,10 +847,20 @@ function normalizeClock(value) {
 
 let facility = {
   name: DEFAULT_FACILITY.name,
+  address: DEFAULT_FACILITY.address,
+  systemName: DEFAULT_FACILITY.systemName,
   lat: DEFAULT_FACILITY.lat,
   lng: DEFAULT_FACILITY.lng,
   defaultDepartureTime: DEFAULT_FACILITY.defaultDepartureTime
 };
+
+function normalizeFacilityAddress(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 120) : '';
+}
+
+function normalizeSystemName(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 40) : '';
+}
 
 function loadFacility() {
   const raw = readJsonStorage(STORAGE_KEYS.FACILITY);
@@ -858,6 +870,8 @@ function loadFacility() {
   const lng = normalizeCoord(src.lng, -180, 180);
   facility = {
     name: name || DEFAULT_FACILITY.name,
+    address: normalizeFacilityAddress(src.address),
+    systemName: normalizeSystemName(src.systemName),
     lat: lat == null ? DEFAULT_FACILITY.lat : lat,
     lng: lng == null ? DEFAULT_FACILITY.lng : lng,
     defaultDepartureTime: normalizeClock(src.defaultDepartureTime) || DEFAULT_FACILITY.defaultDepartureTime
@@ -867,6 +881,8 @@ function loadFacility() {
 function getFacility() {
   return {
     name: facility.name,
+    address: facility.address || '',
+    systemName: facility.systemName || '',
     lat: facility.lat,
     lng: facility.lng,
     defaultDepartureTime: facility.defaultDepartureTime
@@ -878,8 +894,16 @@ function saveFacility(partial) {
   const name = typeof src.name === 'string' ? src.name.trim().slice(0, 40) : '';
   const lat = Object.prototype.hasOwnProperty.call(src, 'lat') ? normalizeCoord(src.lat, -90, 90) : facility.lat;
   const lng = Object.prototype.hasOwnProperty.call(src, 'lng') ? normalizeCoord(src.lng, -180, 180) : facility.lng;
+  const address = Object.prototype.hasOwnProperty.call(src, 'address')
+    ? normalizeFacilityAddress(src.address)
+    : (facility.address || '');
+  const systemName = Object.prototype.hasOwnProperty.call(src, 'systemName')
+    ? normalizeSystemName(src.systemName)
+    : (facility.systemName || '');
   facility = {
     name: name || facility.name,
+    address,
+    systemName,
     lat: lat == null ? facility.lat : lat,
     lng: lng == null ? facility.lng : lng,
     defaultDepartureTime: normalizeClock(src.defaultDepartureTime) || facility.defaultDepartureTime
@@ -1107,6 +1131,8 @@ function loadData() {
   } catch (e) {
     facility = {
       name: DEFAULT_FACILITY.name,
+      address: DEFAULT_FACILITY.address,
+      systemName: DEFAULT_FACILITY.systemName,
       lat: DEFAULT_FACILITY.lat,
       lng: DEFAULT_FACILITY.lng,
       defaultDepartureTime: DEFAULT_FACILITY.defaultDepartureTime

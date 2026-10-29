@@ -29,6 +29,17 @@ h1 {
   color: #1e3a8a;
 }
 
+.app-title { margin-bottom: 2px; }
+
+.app-subtitle {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.4;
+}
+
 /* リアルタイム集計バー */
 .status-bar {
   position: sticky;
@@ -915,6 +926,8 @@ input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px
 .place-picker-search input { flex: 1; min-width: 0; }
 .place-picker-search .btn { flex: 0 0 auto; margin: 0; min-height: 40px; }
 .place-link-input { width: 100%; margin-bottom: 6px; }
+.facility-place { margin: 8px 0 12px; }
+.facility-place .place-picker-search .btn { width: auto; }
 .place-map {
   height: 220px;
   border-radius: 10px;

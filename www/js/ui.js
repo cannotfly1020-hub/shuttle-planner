@@ -598,6 +598,7 @@ function toggleSettingsPanel() {
   writeSectionOpenState('settings', nextOpen);
   const toggle = panel.querySelector('.panel-toggle');
   if (toggle) toggle.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  if (nextOpen) revealFacilityMap();
 }
 
 function applySettingsPanelState() {
@@ -607,6 +608,7 @@ function applySettingsPanelState() {
   panel.classList.toggle('is-open', isOpen);
   const toggle = panel.querySelector('.panel-toggle');
   if (toggle) toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  if (isOpen) revealFacilityMap();
 }
 
 function openChildCompanionEditor(childId) {
@@ -2335,6 +2337,9 @@ function applyPassengerPlace(passenger, scope) {
 }
 
 let routePlanBase = '';
+let facilityFormDirty = false;
+let facilityMapState = null;
+let facilityPlaceSeq = 0;
 
 function readDepartureTime() {
   const input = document.getElementById('departureTimeInput');
@@ -2342,18 +2347,27 @@ function readDepartureTime() {
   return normalizeClock(input && input.value ? input.value : '') || facility.defaultDepartureTime;
 }
 
+function fillFacilityFieldsFromStore() {
+  const facility = getFacility();
+  const name = document.getElementById('facilityNameInput');
+  const address = document.getElementById('facilityAddressInput');
+  const lat = document.getElementById('facilityLatInput');
+  const lng = document.getElementById('facilityLngInput');
+  const depart = document.getElementById('facilityDepartureInput');
+  if (name && document.activeElement !== name) name.value = facility.name;
+  if (address && document.activeElement !== address) address.value = facility.address || '';
+  if (lat && document.activeElement !== lat && facility.lat != null) lat.value = roundCoord4(facility.lat).toFixed(4);
+  if (lng && document.activeElement !== lng && facility.lng != null) lng.value = roundCoord4(facility.lng).toFixed(4);
+  if (depart && document.activeElement !== depart) depart.value = facility.defaultDepartureTime;
+}
+
 function syncFacilityInputs() {
   const facility = getFacility();
   const time = document.getElementById('departureTimeInput');
   const caption = document.getElementById('facilityCaption');
-  const name = document.getElementById('facilityNameInput');
-  const lat = document.getElementById('facilityLatInput');
-  const lng = document.getElementById('facilityLngInput');
   if (time) time.value = facility.defaultDepartureTime;
   if (caption) caption.textContent = `出発地: ${facility.name}`;
-  if (name && document.activeElement !== name) name.value = facility.name;
-  if (lat && document.activeElement !== lat) lat.value = String(facility.lat);
-  if (lng && document.activeElement !== lng) lng.value = String(facility.lng);
+  if (!facilityFormDirty) fillFacilityFieldsFromStore();
 }
 
 function setDepartureTime(value) {
@@ -2391,6 +2405,243 @@ function refreshRouteIfVisible() {
   if (routePlanBase && currentAssignments && card && card.style.display !== 'none') {
     publishRouteTimeline(routePlanBase);
   }
+}
+
+function facilityDom() {
+  return {
+    map: document.getElementById('facilityPickerMap'),
+    search: document.getElementById('facilityPlaceSearch'),
+    link: document.getElementById('facilityPlaceLink'),
+    note: document.getElementById('facilityPlaceNote'),
+    address: document.getElementById('facilityAddressInput'),
+    lat: document.getElementById('facilityLatInput'),
+    lng: document.getElementById('facilityLngInput'),
+    name: document.getElementById('facilityNameInput'),
+    time: document.getElementById('facilityDepartureInput')
+  };
+}
+
+function setFacilityNote(text) {
+  const note = facilityDom().note;
+  if (note) note.textContent = text || '';
+}
+
+function writeFacilityCoords(lat, lng) {
+  const dom = facilityDom();
+  if (dom.lat) dom.lat.value = Number.isFinite(lat) ? roundCoord4(lat).toFixed(4) : '';
+  if (dom.lng) dom.lng.value = Number.isFinite(lng) ? roundCoord4(lng).toFixed(4) : '';
+  facilityFormDirty = true;
+}
+
+function readFacilityCoords() {
+  const dom = facilityDom();
+  const lat = normalizeCoord(dom.lat ? dom.lat.value : '', -90, 90);
+  const lng = normalizeCoord(dom.lng ? dom.lng.value : '', -180, 180);
+  if (lat == null || lng == null) return null;
+  return { lat, lng };
+}
+
+function destroyFacilityMap() {
+  if (facilityMapState && facilityMapState.map) facilityMapState.map.remove();
+  facilityMapState = null;
+  const el = facilityDom().map;
+  if (el) {
+    if (el._leaflet_id) delete el._leaflet_id;
+    el.innerHTML = '';
+  }
+}
+
+function ensureFacilityMarker(lat, lng) {
+  if (!facilityMapState || !facilityMapState.map || typeof L === 'undefined') return;
+  const ll = L.latLng(lat, lng);
+  if (!facilityMapState.marker) {
+    facilityMapState.marker = L.marker(ll, { draggable: true, autoPan: true, icon: placeMarkerIcon() }).addTo(facilityMapState.map);
+    facilityMapState.marker.on('drag', () => {
+      const point = facilityMapState.marker.getLatLng();
+      writeFacilityCoords(point.lat, point.lng);
+    });
+    facilityMapState.marker.on('dragend', () => {
+      const point = facilityMapState.marker.getLatLng();
+      const lat4 = roundCoord4(point.lat);
+      const lng4 = roundCoord4(point.lng);
+      writeFacilityCoords(lat4, lng4);
+      reverseFillFacility(lat4, lng4);
+    });
+  } else {
+    facilityMapState.marker.setLatLng(ll);
+  }
+}
+
+function mountFacilityMap() {
+  const dom = facilityDom();
+  if (!dom.map) return null;
+  if (typeof L === 'undefined') {
+    setFacilityNote('地図を読み込めませんでした。緯度と経度を直接入力できます。');
+    return null;
+  }
+  if (facilityMapState && facilityMapState.map && facilityMapState.map.getContainer() === dom.map) {
+    refreshMapSize(facilityMapState.map);
+    return facilityMapState;
+  }
+  destroyFacilityMap();
+  placeMarkerIcon();
+  const saved = getFacility();
+  const typed = readFacilityCoords();
+  const center = typed || { lat: Number(saved.lat), lng: Number(saved.lng) };
+  const map = L.map(dom.map, { zoomControl: true }).setView([center.lat, center.lng], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  map.on('click', (event) => {
+    pinFacility(event.latlng.lat, event.latlng.lng, { geocode: true, pan: false });
+  });
+  facilityMapState = { map, marker: null };
+  ensureFacilityMarker(center.lat, center.lng);
+  refreshMapSize(map);
+  return facilityMapState;
+}
+
+function pinFacility(lat, lng, options) {
+  const opts = options || {};
+  const lat4 = roundCoord4(lat);
+  const lng4 = roundCoord4(lng);
+  if (!Number.isFinite(lat4) || !Number.isFinite(lng4)) return;
+  writeFacilityCoords(lat4, lng4);
+  const state = mountFacilityMap();
+  if (state) {
+    ensureFacilityMarker(lat4, lng4);
+    if (opts.pan !== false) state.map.setView([lat4, lng4], Math.max(state.map.getZoom(), 16));
+  }
+  if (opts.geocode) reverseFillFacility(lat4, lng4);
+  if (opts.address) {
+    const addressEl = facilityDom().address;
+    if (addressEl && !addressEl.value.trim()) addressEl.value = String(opts.address).slice(0, 120);
+  }
+}
+
+function reverseFillFacility(lat, lng) {
+  const seq = facilityPlaceSeq + 1;
+  facilityPlaceSeq = seq;
+  reverseAddress(lat, lng).then((address) => {
+    if (facilityPlaceSeq !== seq) return;
+    if (!address) {
+      setFacilityNote('座標は入りました。住所の自動入力はできませんでした。');
+      return;
+    }
+    const addressEl = facilityDom().address;
+    if (addressEl) addressEl.value = String(address).slice(0, 120);
+    facilityFormDirty = true;
+    setFacilityNote('位置と住所を入れました。「施設位置を保存」で運行計画に反映します。');
+  }).catch(() => {
+    if (facilityPlaceSeq !== seq) return;
+    setFacilityNote('座標は入りました。住所の自動入力はできませんでした。');
+  });
+}
+
+function revealFacilityMap() {
+  const panel = document.getElementById('settingsPanel');
+  if (!panel || !panel.classList.contains('is-open')) return;
+  if (!facilityFormDirty) fillFacilityFieldsFromStore();
+  const state = mountFacilityMap();
+  if (state && state.map) {
+    refreshMapSize(state.map);
+    setTimeout(() => {
+      if (facilityMapState && facilityMapState.map) facilityMapState.map.invalidateSize();
+    }, 240);
+  }
+}
+
+function applyFacilityLink() {
+  const link = facilityDom().link;
+  const raw = link ? link.value.trim() : '';
+  if (!raw) return;
+  const parsed = parseMapsLink(raw);
+  if (!parsed) {
+    if (/maps\.app\.goo\.gl|goo\.gl\//i.test(raw)) {
+      setFacilityNote('短縮URLには座標が含まれていません。開いたあとの長いURLを貼ってください。');
+    }
+    return;
+  }
+  pinFacility(parsed.lat, parsed.lng, { geocode: true, pan: true });
+  setFacilityNote('リンクから位置を読み取りました。「施設位置を保存」で運行計画に反映します。');
+}
+
+async function searchFacilityPlace() {
+  const dom = facilityDom();
+  const query = (dom.search && dom.search.value.trim()) || (dom.address && dom.address.value.trim());
+  if (!query) {
+    setFacilityNote('検索する住所を入力してください。');
+    return;
+  }
+  revealFacilityMap();
+  setFacilityNote('検索しています…');
+  try {
+    const hit = await geocodeAddress(query);
+    if (!hit || !Number.isFinite(hit.lat) || !Number.isFinite(hit.lng)) {
+      setFacilityNote('その住所は見つかりませんでした。地図をタップして指定できます。');
+      return;
+    }
+    pinFacility(hit.lat, hit.lng, { geocode: true, pan: true, address: hit.title || query });
+  } catch (e) {
+    setFacilityNote('検索できませんでした。地図をタップして指定できます。');
+  }
+}
+
+function syncFacilityPinFromInputs() {
+  const coords = readFacilityCoords();
+  if (!coords) return;
+  facilityFormDirty = true;
+  if (!facilityMapState) return;
+  pinFacility(coords.lat, coords.lng, { geocode: false, pan: true });
+}
+
+function saveFacilityPlace() {
+  const dom = facilityDom();
+  const coords = readFacilityCoords();
+  if (!coords) {
+    setFacilityNote('地図で施設の位置を指定してください。');
+    return;
+  }
+  const current = getFacility();
+  const name = dom.name && dom.name.value.trim() ? dom.name.value.trim().slice(0, 40) : current.name;
+  const address = dom.address ? dom.address.value.trim().slice(0, 120) : '';
+  const time = normalizeClock(dom.time && dom.time.value ? dom.time.value : '') || current.defaultDepartureTime;
+  saveFacility({
+    name,
+    address,
+    lat: coords.lat,
+    lng: coords.lng,
+    defaultDepartureTime: time
+  });
+  facilityFormDirty = false;
+  syncFacilityInputs();
+  if (facilityMapState && facilityMapState.map) {
+    facilityMapState.map.setView([coords.lat, coords.lng], Math.max(facilityMapState.map.getZoom(), 16));
+    ensureFacilityMarker(coords.lat, coords.lng);
+  }
+  refreshRouteIfVisible();
+  syncPrintHeader();
+  setFacilityNote('施設位置を保存しました。出発・帰還の地点がこの位置に切り替わりました。');
+}
+
+function bindFacilityPlaceFields() {
+  const dom = facilityDom();
+  if (dom.link) dom.link.addEventListener('input', () => applyFacilityLink());
+  if (dom.search) {
+    dom.search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      searchFacilityPlace();
+    });
+  }
+  if (dom.address) {
+    dom.address.addEventListener('input', () => { facilityFormDirty = true; });
+  }
+  if (dom.name) dom.name.addEventListener('input', () => { facilityFormDirty = true; });
+  if (dom.time) dom.time.addEventListener('input', () => { facilityFormDirty = true; });
+  if (dom.lat) dom.lat.addEventListener('change', () => syncFacilityPinFromInputs());
+  if (dom.lng) dom.lng.addEventListener('change', () => syncFacilityPinFromInputs());
 }
 
 function stripRouteSection(text) {
@@ -2496,7 +2747,59 @@ function formatPrintServiceDate(dateStr) {
   return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日（${weekday}）`;
 }
 
+const DEFAULT_APP_BRAND = {
+  fullName: 'shuttle-planner | 送迎計画・運行最適化',
+  shortName: 'shuttle-planner 送迎管理',
+  subtitle: '福祉・通所介護・スクール向け送迎最適化',
+  productName: 'shuttle-planner',
+  planLabel: '本日の送迎運行計画'
+};
+
+function appBrand() {
+  const facility = typeof getFacility === 'function' ? getFacility() : null;
+  const custom = facility && typeof facility.systemName === 'string' ? facility.systemName.trim() : '';
+  if (!custom) return DEFAULT_APP_BRAND;
+  return {
+    fullName: custom,
+    shortName: custom,
+    subtitle: DEFAULT_APP_BRAND.subtitle,
+    productName: custom,
+    planLabel: DEFAULT_APP_BRAND.planLabel
+  };
+}
+
+function planTextHeader() {
+  const brand = appBrand();
+  return `【${brand.planLabel} - ${brand.productName}】`;
+}
+
+function applyPlanBrandHeader(text) {
+  const header = planTextHeader();
+  const body = String(text || '');
+  if (!body) return header;
+  const lines = body.split('\n');
+  if (lines[0] === '本日の送迎割り当て表' || /^【本日の送迎運行計画 - .+】$/.test(lines[0])) {
+    lines[0] = header;
+    return lines.join('\n');
+  }
+  return `${header}\n${body}`;
+}
+
+function syncAppBrand() {
+  const brand = appBrand();
+  document.title = brand.fullName;
+  const title = document.querySelector('.app-title');
+  if (title) title.textContent = brand.shortName;
+  const subtitle = document.querySelector('.app-subtitle');
+  if (subtitle) subtitle.textContent = brand.subtitle;
+  const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if (apple) apple.setAttribute('content', brand.shortName);
+  const printTitle = document.getElementById('printPlanTitle');
+  if (printTitle) printTitle.textContent = `${brand.planLabel} - ${brand.productName}`;
+}
+
 function syncPrintHeader() {
+  syncAppBrand();
   const dateEl = document.getElementById('printServiceDate');
   const metaEl = document.getElementById('printCreatedMeta');
   if (dateEl) dateEl.textContent = `運行日: ${formatPrintServiceDate(getSelectedServiceDate())}`;
@@ -2506,6 +2809,8 @@ function syncPrintHeader() {
   const now = new Date();
   const stamp = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   metaEl.textContent = facilityName ? `${stamp} / ${facilityName}` : stamp;
+  const addressEl = document.getElementById('printFacilityAddress');
+  if (addressEl) addressEl.textContent = facility && facility.address ? facility.address : '';
 }
 
 function printDispatchSheet() {
@@ -2523,10 +2828,12 @@ function vehiclePrintHeaderText(schedule) {
 }
 
 function renderPrintTimelineTable(schedule) {
+  const facility = typeof getFacility === 'function' ? getFacility() : null;
+  const facilityAddress = escapeRoleText(facility && facility.address ? facility.address : '');
   const rows = (schedule.timeline || []).map((stop) => {
     if (!stop) return '';
     if (stop.type === 'depot_start') {
-      return `<tr><td>${escapeRoleText(stop.departureTime)}発</td><td>出発: ${escapeRoleText(stop.name)}</td><td></td><td></td><td></td></tr>`;
+      return `<tr><td>${escapeRoleText(stop.departureTime)}発</td><td>出発: ${escapeRoleText(stop.name)}</td><td></td><td></td><td>${facilityAddress}</td></tr>`;
     }
     if (stop.type === 'passenger') {
       const tags = (stop.careTags || []).map((tag) => `<span class="care-tag-badge">${escapeRoleText(tag)}</span>`).join('');
@@ -2534,7 +2841,7 @@ function renderPrintTimelineTable(schedule) {
       return `<tr><td>${escapeRoleText(stop.arrivalTime)}着 ${escapeRoleText(stop.departureTime)}発</td><td>${escapeRoleText(stop.name)}</td><td>${tags}</td><td>${dwell}</td><td>${escapeRoleText(stop.address || '')}</td></tr>`;
     }
     if (stop.type === 'depot_end') {
-      return `<tr><td>${escapeRoleText(stop.arrivalTime)}着</td><td>到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</td><td></td><td></td><td></td></tr>`;
+      return `<tr><td>${escapeRoleText(stop.arrivalTime)}着</td><td>到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</td><td></td><td></td><td>${facilityAddress}</td></tr>`;
     }
     return '';
   }).join('');
@@ -2556,7 +2863,8 @@ function renderRouteTimeline(schedules) {
     const stops = (schedule.timeline || []).map((stop) => {
       if (stop.type === 'depot_start') {
         const mapLink = routeMapAnchor(facility, `${stop.name}への出発案内をGoogleマップで開く`);
-        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span class="route-stop-body">出発: ${escapeRoleText(stop.name)}</span>${mapLink}</div>`;
+        const depotAddress = facility && facility.address ? `<div class="route-address">${escapeRoleText(facility.address)}</div>` : '';
+        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span class="route-stop-body">出発: ${escapeRoleText(stop.name)}</span>${mapLink}</div>${depotAddress}`;
       }
       if (stop.type === 'passenger') {
         const tags = stop.careTags && stop.careTags.length ? ` [${escapeRoleText(stop.careTags.join('、'))}]` : '';
@@ -2567,8 +2875,9 @@ function renderRouteTimeline(schedules) {
       }
       if (stop.type === 'depot_end') {
         const mapLink = routeMapAnchor(facility, `${stop.name}への到着案内をGoogleマップで開く`);
+        const depotAddress = facility && facility.address ? `<div class="route-address">${escapeRoleText(facility.address)}</div>` : '';
         return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
-          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}</span><span class="route-stop-body">到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</span>${mapLink}</div>`;
+          <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}</span><span class="route-stop-body">到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</span>${mapLink}</div>${depotAddress}`;
       }
       return '';
     }).join('');
@@ -2578,10 +2887,13 @@ function renderRouteTimeline(schedules) {
 }
 
 function publishRouteTimeline(baseText) {
-  routePlanBase = stripRouteSection(baseText || '');
+  const branded = applyPlanBrandHeader(baseText || '');
+  routePlanBase = stripRouteSection(branded);
   const schedules = buildCurrentRouteSchedules();
   renderRouteTimeline(schedules);
   lastGeneratedPlan = mergeRouteIntoPlan(routePlanBase, schedules);
+  const box = document.getElementById('resultText');
+  if (box) box.textContent = routePlanBase;
 }
 
 function runDispatchWithRoute() {
@@ -2673,6 +2985,8 @@ function maybeShowTutorialOnLaunch() {
 
 bindCarReorderGestures();
 bindPlacePickerFields();
+bindFacilityPlaceFields();
+syncAppBrand();
 window.addEventListener('beforeprint', syncPrintHeader);
 
 
@@ -2754,6 +3068,9 @@ window.addEventListener('beforeprint', syncPrintHeader);
     togglePassengerDayStatus,
     runDispatchWithRoute,
     printDispatchSheet,
+    syncAppBrand,
+    searchFacilityPlace,
+    saveFacilityPlace,
     togglePlacePicker,
     searchPlace,
     setDepartureTime,

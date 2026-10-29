@@ -52,6 +52,8 @@ const CLICK_ACTIONS = new Set([
   'open-tutorial',
   'toggle-place-picker',
   'search-place',
+  'search-facility',
+  'save-facility',
   'close-tutorial',
   'tutorial-next',
   'tutorial-prev',
@@ -195,6 +197,12 @@ function runClickAction(target) {
       break;
     case 'search-place':
       searchPlace(target.dataset.scope || 'edit');
+      break;
+    case 'search-facility':
+      searchFacilityPlace();
+      break;
+    case 'save-facility':
+      saveFacilityPlace();
       break;
     case 'toggle-role-master':
       toggleRoleMaster();

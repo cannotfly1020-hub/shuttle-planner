@@ -1,7 +1,7 @@
 {
-  "name": "配車ヘルパー",
-  "short_name": "配車",
-  "description": "少年野球チームの配車決定とLINE共有を支援するオフライン対応アプリ",
+  "name": "shuttle-planner | 送迎計画・運行最適化",
+  "short_name": "shuttle-planner 送迎管理",
+  "description": "福祉・通所介護・スクール向け送迎最適化",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
