@@ -71,7 +71,7 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_FACILITY = {
-  name: 'ひまわり放課後デイ 施設',
+  name: 'ひまわり通所介護',
   address: '',
   systemName: '',
   lat: 33.9575,
@@ -84,10 +84,10 @@ const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const JS_DAY_TO_KEY = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 const DEFAULT_ROLES = [
-  { id: 'role_driver', name: '運転手（職員）', isDriver: true, isAssistant: false, badgeColor: '#2563eb' },
+  { id: 'role_driver', name: '送迎ドライバー', isDriver: true, isAssistant: false, badgeColor: '#2563eb' },
   { id: 'role_outsource', name: '委託ドライバー', isDriver: true, isAssistant: false, badgeColor: '#4b5563' },
-  { id: 'role_instructor', name: '児童指導員 / 介護職', isDriver: true, isAssistant: true, badgeColor: '#059669' },
-  { id: 'role_nurse', name: '看護師（医療ケア）', isDriver: false, isAssistant: true, badgeColor: '#dc2626' }
+  { id: 'role_instructor', name: '介護福祉士 / 介護職員', isDriver: true, isAssistant: true, badgeColor: '#059669' },
+  { id: 'role_nurse', name: '看護師 / 機能訓練指導員', isDriver: false, isAssistant: true, badgeColor: '#dc2626' }
 ];
 
 const DEFAULT_CARE_TAGS = [
@@ -376,10 +376,32 @@ function extraCareTagsFromChildren(baseTags) {
   return sanitizeCareTags(tags);
 }
 
+const LEGACY_DEFAULT_ROLE_NAMES = {
+  role_driver: ['運転手（職員）'],
+  role_instructor: ['児童指導員 / 介護職'],
+  role_nurse: ['看護師（医療ケア）']
+};
+
+function refreshDefaultRoleNames(roles) {
+  const defaults = defaultRoles();
+  let changed = false;
+  const next = (Array.isArray(roles) ? roles : []).map((role) => {
+    if (!role) return role;
+    const legacy = LEGACY_DEFAULT_ROLE_NAMES[role.id];
+    const fresh = defaults.find((item) => item.id === role.id);
+    if (!legacy || !fresh || legacy.indexOf(role.name) === -1 || role.name === fresh.name) return role;
+    changed = true;
+    return Object.assign({}, role, { name: fresh.name });
+  });
+  return { roles: next, changed: changed };
+}
+
 function loadRoleMaster() {
   const stored = sanitizeRoles(readJsonStorage(STORAGE_KEYS.ROLES));
   staffRoles = stored.length ? stored : migrateLegacyRoleLists();
-  if (!stored.length) writeJsonStorage(STORAGE_KEYS.ROLES, staffRoles);
+  const refreshed = refreshDefaultRoleNames(staffRoles);
+  staffRoles = refreshed.roles.length ? refreshed.roles : defaultRoles();
+  if (!stored.length || refreshed.changed) writeJsonStorage(STORAGE_KEYS.ROLES, staffRoles);
   return staffRoles;
 }
 
@@ -467,7 +489,7 @@ function saveDriverRoles(list) {
 
 function getCompanionRoles() {
   const names = getRoles().filter((role) => role.isAssistant).map((role) => role.name);
-  return names.length ? names : ['看護師（医療ケア）'];
+  return names.length ? names : ['看護師 / 機能訓練指導員'];
 }
 
 function saveCompanionRoles(list) {
@@ -499,7 +521,7 @@ function resetRoleLabels() {
 function defaultDriverName() {
   const drivers = staffRoles.filter((role) => role.isDriver);
   if (drivers.length) return drivers[0].name;
-  return '運転手（職員）';
+  return '送迎ドライバー';
 }
 
 function normalizeAssistantRole(value) {
@@ -817,12 +839,11 @@ function familySeatsOf(car) {
 
 function createDefaultChildren() {
   return [
-    { id: 1, name: 'ゆうと', furigana: 'ゆうと', groupClass: '小学部', grade: '小学部', careTags: ['見守り'], pos: '', parentCar: '1号車', fixedVehicle: '1号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市綾羅木町1-1', lat: 33.968, lng: 130.95, boardingTimeMinutes: null },
-    { id: 2, name: 'そうた', furigana: 'そうた', groupClass: '小学部', grade: '小学部', careTags: [], pos: '', parentCar: '2号車', fixedVehicle: '2号車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市安岡町2-2', lat: 33.95, lng: 130.958, boardingTimeMinutes: null },
-    { id: 3, name: 'れん', furigana: 'れん', groupClass: 'A組', grade: 'A組', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市椋野町3-3', lat: 33.9665, lng: 130.928, boardingTimeMinutes: null },
-    { id: 4, name: 'はると', furigana: 'はると', groupClass: 'A組', grade: 'A組', careTags: ['車椅子'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市吉見町4-4', lat: 33.9495, lng: 130.9305, boardingTimeMinutes: null },
-    { id: 5, name: 'こうき', furigana: 'こうき', groupClass: 'デイ', grade: 'デイ', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市秋根町5-5', lat: 33.961, lng: 130.9625, boardingTimeMinutes: null },
-    { id: 6, name: '大和', furigana: 'やまと', groupClass: 'デイ', grade: 'デイ', careTags: ['見守り'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市富任町6-6', lat: 33.946, lng: 130.9485, boardingTimeMinutes: null }
+    { id: 1, name: '佐藤 トメ', furigana: 'さとう とめ', groupClass: '要介護3', grade: '要介護3', careTags: ['車椅子'], pos: '', parentCar: 'リフト車', fixedVehicle: 'リフト車', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市綾羅木町1-1', lat: 33.968, lng: 130.95, boardingTimeMinutes: null },
+    { id: 2, name: '高橋 健一', furigana: 'たかはし けんいち', groupClass: '要介護1', grade: '要介護1', careTags: ['車酔い配慮'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: true, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市安岡町2-2', lat: 33.95, lng: 130.958, boardingTimeMinutes: null },
+    { id: 3, name: '田中 ハル', furigana: 'たなか はる', groupClass: '要介護2', grade: '要介護2', careTags: ['見守り'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市椋野町3-3', lat: 33.9665, lng: 130.928, boardingTimeMinutes: null },
+    { id: 4, name: '渡辺 茂', furigana: 'わたなべ しげる', groupClass: '要支援2', grade: '要支援2', careTags: [], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市吉見町4-4', lat: 33.9495, lng: 130.9305, boardingTimeMinutes: null },
+    { id: 5, name: '小林 キヨ', furigana: 'こばやし きよ', groupClass: '要介護4', grade: '要介護4', careTags: ['車椅子', '医療的ケア'], pos: '', parentCar: '', fixedVehicle: '', fixedCar: '', motionSick: false, active: true, meetOnSite: false, companions: [], lastCar: '', rideHistory: {}, address: '山口県下関市秋根町5-5', lat: 33.961, lng: 130.9625, boardingTimeMinutes: null }
   ];
 }
 

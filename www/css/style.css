@@ -873,21 +873,43 @@ h1 {
   flex-direction: column;
   gap: 2px;
   flex: 1 1 140px;
-  min-width: 120px;
-  font-size: 10px;
+  min-width: 0;
+  font-size: 11px;
   font-weight: 700;
   color: #64748b;
 }
 .add-field input,
 .add-field select { width: 100%; }
-.add-form-child { margin-top: 6px; }
+.passenger-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: start;
+  width: 100%;
+  margin-top: 8px;
+}
+.passenger-form > .add-field,
+.passenger-form > .modal-field,
+.passenger-form > .inline-check-label,
+.passenger-form > .btn-secondary {
+  min-width: 0;
+  flex: none;
+}
+.passenger-form-span { grid-column: 1 / -1; }
+.passenger-form input[type="text"],
+.passenger-form input[type="number"],
+.passenger-form select {
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  box-sizing: border-box;
+}
+.passenger-form-modal { margin-top: 0; }
+.passenger-form .modal-field { margin-bottom: 0; }
 input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
 #newCarName { flex: 3; min-width: 110px; }
 #newCarCapacity { width: 50px; }
-#newChildName { flex: 2; min-width: 60px; }
-#newChildGrade { flex: 1 1 140px; min-width: 120px; width: auto; }
-#newChildPos { flex: 1 1 160px; min-width: 140px; width: auto; }
-#newChildParentCar { flex: 2; min-width: 80px; }
 .inline-check-label { display: flex; align-items: center; font-size: 11px; gap: 3px; padding: 2px; }
 
 .mode-select-box { margin-top: 6px; padding: 8px; background: #eef2ff; border-radius: 8px; }
@@ -1256,6 +1278,11 @@ input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px
   pointer-events: auto;
 }
 .modal-box { background: white; width: 100%; max-width: 320px; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+.edit-modal-box {
+  max-width: 520px;
+  max-height: min(90vh, 760px);
+  overflow: auto;
+}
 .modal-box h3 { margin-top: 0; font-size: 16px; color: #1e3a8a; margin-bottom: 12px; }
 .modal-field { margin-bottom: 10px; }
 .modal-field label { display: block; font-size: 12px; color: #64748b; margin-bottom: 4px; }

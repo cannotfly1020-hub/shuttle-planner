@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="スマート送迎">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=20261029u">
+<link rel="stylesheet" href="css/style.css?v=20261030a">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
@@ -102,7 +102,7 @@
       <div class="panel-toolbar">
         <select class="select-sort-mode" id="childSortModeSelect" data-action="change-child-sort" aria-label="利用者の並び順" title="利用者の並び順">
           <option value="default">並び順: 登録順</option>
-          <option value="grade">並び順: 区分順</option>
+          <option value="grade">並び順: 介護度順</option>
           <option value="position">並び順: 要配慮順</option>
           <option value="kana">並び順: 50音順</option>
         </select>
@@ -113,35 +113,35 @@
         </div>
       </div>
       <div id="childList"></div>
-      <div class="add-form add-form-child">
+      <div class="passenger-form add-form-child">
         <label class="add-field">
-          <span>利用者名</span>
-          <input type="text" id="newChildName" placeholder="名前" aria-label="利用者名">
+          <span>利用者氏名</span>
+          <input type="text" id="newChildName" placeholder="例: 佐藤 テル" maxlength="40" aria-label="利用者氏名">
         </label>
         <label class="add-field">
           <span>ふりがな</span>
-          <input type="text" id="newChildFurigana" placeholder="例: やまだ たろう" maxlength="40" aria-label="ふりがな">
+          <input type="text" id="newChildFurigana" placeholder="例: さとう てる" maxlength="40" aria-label="ふりがな">
         </label>
         <label class="add-field">
-          <span>区分 / クラス</span>
-          <input type="text" id="newChildGrade" placeholder="例: 小学部, A組, デイ" maxlength="20" aria-label="区分 / クラス">
+          <span>介護度 / 区分</span>
+          <input type="text" id="newChildGrade" placeholder="例: 要介護2, 一般" maxlength="24" aria-label="介護度 / 区分">
         </label>
-        <div class="add-field add-field-tags">
+        <label class="add-field">
+          <span>車両拘束・希望</span>
+          <select id="newChildParentCar" aria-label="車両拘束・希望">
+            <option value="">指定なし</option>
+          </select>
+        </label>
+        <div class="add-field passenger-form-span">
           <span>要配慮タグ</span>
           <div id="newChildCarePills" class="care-pill-group" role="group" aria-label="要配慮タグ"></div>
           <input type="hidden" id="newChildPos" value="">
         </div>
-        <label class="add-field">
-          <span>専用車両拘束</span>
-          <select id="newChildParentCar" aria-label="専用車両拘束">
-            <option value="">専用車両: なし</option>
-          </select>
-        </label>
-        <label class="add-field">
+        <label class="add-field passenger-form-span">
           <span>住所</span>
           <input type="text" id="newChildAddress" placeholder="例: 山口県下関市○○町1-2-3" maxlength="120" aria-label="住所">
         </label>
-        <div class="add-field">
+        <div class="add-field passenger-form-span">
           <button type="button" class="btn btn-outline place-toggle" data-action="toggle-place-picker" data-scope="new">地図を開いて位置を指定</button>
           <div id="newPlacePicker" class="place-picker" hidden>
             <div class="place-picker-search">
@@ -161,7 +161,7 @@
           <span>経度（任意）</span>
           <input type="number" id="newChildLng" placeholder="130.9480" step="0.0001" aria-label="経度">
         </label>
-        <div class="add-field add-field-tags">
+        <div class="add-field passenger-form-span">
           <span>定期利用曜日</span>
           <div id="newChildWeekdays" class="weekday-toggle" role="group" aria-label="定期利用曜日">
             <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="mon">月</button>
@@ -173,10 +173,10 @@
             <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="new" data-day="sun">日</button>
           </div>
         </div>
-        <label class="inline-check-label">
+        <label class="inline-check-label passenger-form-span">
           <input type="checkbox" id="newChildMotionSick" data-action="toggle-motion-sick" data-scope="new"> 車酔い配慮
         </label>
-        <button type="button" class="btn-secondary" data-action="add-child">利用者登録</button>
+        <button type="button" class="btn-secondary passenger-form-span" data-action="add-child">利用者登録</button>
       </div>
     </div>
   </section>
@@ -190,15 +190,15 @@
     <label class="mode-label">割り当ての優先モード:</label>
     <select id="carpoolMode">
       <option value="balance">⚖ 標準（専用車両の拘束 ＋ 過去の運行履歴）</option>
-      <option value="grade_same">🎒 同じ区分を同乗（クラスをまとめる）</option>
-      <option value="grade_diff">🔀 区分を分散（クラスが偏らないように）</option>
+      <option value="grade_same">🎒 同じ介護度を同乗</option>
+      <option value="grade_diff">🔀 介護度を分散</option>
       <option value="position">♿ 要配慮を分散（車椅子などの偏り防止）</option>
     </select>
   </div>
   <div class="mode-select-box">
     <label class="mode-label" for="departureTimeInput">出発時刻:</label>
     <input type="time" id="departureTimeInput" value="14:30" data-action="set-departure-time" aria-label="出発時刻">
-    <span class="facility-caption" id="facilityCaption">出発地: ひまわり放課後デイ 施設</span>
+    <span class="facility-caption" id="facilityCaption">出発地: ひまわり通所介護</span>
   </div>
   <button type="button" class="btn btn-primary" data-action="generate">⚡ 運行計画を生成</button>
 </div>
@@ -248,7 +248,7 @@
       <p class="settings-hint">事業所・施設情報（出発・帰還の基準地点）</p>
       <label class="setting-item">
         <span>施設名</span>
-        <input type="text" id="facilityNameInput" maxlength="40" aria-label="施設名" placeholder="例: ひまわり放課後デイ 本園">
+        <input type="text" id="facilityNameInput" maxlength="40" aria-label="施設名" placeholder="例: ひまわりデイサービス">
       </label>
       <label class="setting-item">
         <span>基準出発時刻</span>
@@ -329,7 +329,7 @@
       <div class="tutorial-slide" data-slide="1" hidden>
         <p class="tutorial-slide-title">現場の便利機能</p>
         <ul class="tutorial-list">
-          <li>💡 <strong>職員や保護者が同乗するとき:</strong> 車両の同乗ボタン、または利用者の「＋同乗」をタップ（席数も自動計算）</li>
+          <li>💡 <strong>職員やご家族が同乗するとき:</strong> 車両の同乗ボタン、または利用者の「＋同乗」をタップ（席数も自動計算）</li>
           <li>♿ <strong>リフト車・荷物を載せる車両:</strong> 「特殊・大型車両」にチェックを入れると運行計画の見出しに反映</li>
         </ul>
       </div>
@@ -373,27 +373,34 @@
 
 <!-- 利用者情報 編集モーダル -->
 <div class="modal modal-overlay" id="editModal">
-  <div class="modal-box">
-    <h3>利用者登録</h3>
+  <div class="modal-box edit-modal-box">
+    <h3>利用者の編集</h3>
     <input type="hidden" id="editChildId">
+    <div class="passenger-form passenger-form-modal">
     <div class="modal-field">
-      <label for="editChildName">利用者名</label>
-      <input type="text" id="editChildName">
+      <label for="editChildName">利用者氏名</label>
+      <input type="text" id="editChildName" maxlength="40" placeholder="例: 佐藤 テル">
     </div>
     <div class="modal-field">
       <label for="editChildFurigana">ふりがな</label>
-      <input type="text" id="editChildFurigana" maxlength="40" placeholder="例: やまだ たろう">
+      <input type="text" id="editChildFurigana" maxlength="40" placeholder="例: さとう てる">
     </div>
     <div class="modal-field">
-      <label for="editChildGrade">区分 / クラス</label>
-      <input type="text" id="editChildGrade" maxlength="20" placeholder="例: 小学部, A組, デイ">
+      <label for="editChildGrade">介護度 / 区分</label>
+      <input type="text" id="editChildGrade" maxlength="24" placeholder="例: 要介護2, 一般">
     </div>
     <div class="modal-field">
+      <label for="editChildParentCar">車両拘束・希望</label>
+      <select id="editChildParentCar" aria-label="車両拘束・希望">
+        <option value="">指定なし</option>
+      </select>
+    </div>
+    <div class="modal-field passenger-form-span">
       <span id="editChildPosLabel">要配慮タグ</span>
       <div id="editChildCarePills" class="care-pill-group" role="group" aria-labelledby="editChildPosLabel"></div>
       <input type="hidden" id="editChildPos" value="">
     </div>
-    <div class="modal-field">
+    <div class="modal-field passenger-form-span">
       <span id="editChildWeekdaysLabel">定期利用曜日</span>
       <div id="editChildWeekdays" class="weekday-toggle" role="group" aria-labelledby="editChildWeekdaysLabel">
         <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="mon">月</button>
@@ -405,7 +412,7 @@
         <button type="button" class="weekday-pill" data-action="toggle-schedule-day" data-scope="edit" data-day="sun">日</button>
       </div>
     </div>
-    <div class="modal-field">
+    <div class="modal-field passenger-form-span">
       <label for="editChildAddress">住所</label>
       <input type="text" id="editChildAddress" maxlength="120" placeholder="例: 山口県下関市○○町1-2-3">
       <button type="button" class="btn btn-outline place-toggle" data-action="toggle-place-picker" data-scope="edit">地図を開いて位置を指定</button>
@@ -419,29 +426,26 @@
         <p id="editPlaceNote" class="place-picker-note"></p>
       </div>
     </div>
-    <div class="modal-field modal-field-coords">
+    <div class="modal-field">
       <label for="editChildLat">緯度（任意）</label>
       <input type="number" id="editChildLat" step="0.0001" placeholder="33.9620">
+    </div>
+    <div class="modal-field">
       <label for="editChildLng">経度（任意）</label>
       <input type="number" id="editChildLng" step="0.0001" placeholder="130.9480">
     </div>
-    <div class="modal-field">
-      <label for="editChildParentCar">専用車両拘束</label>
-      <select id="editChildParentCar">
-        <option value="">専用車両: なし</option>
-      </select>
-    </div>
-    <div class="modal-field">
+    <div class="modal-field passenger-form-span">
       <label for="editChildFixedCar">当日の指定車両</label>
       <select id="editChildFixedCar">
         <option value="">自動（指定なし）</option>
       </select>
     </div>
-    <div class="modal-field modal-field-motion">
+    <div class="modal-field modal-field-motion passenger-form-span">
       <label class="motion-edit-label" for="editChildMotionSick">
         <input type="checkbox" id="editChildMotionSick" data-action="toggle-motion-sick" data-scope="edit">
         車酔い配慮（前方座席を優先）
       </label>
+    </div>
     </div>
     <div class="modal-actions">
       <button type="button" class="btn btn-secondary" data-action="close-modal">キャンセル</button>
@@ -451,11 +455,11 @@
 </div>
 
 <!-- 依存順: data → ui → carpool → route → app（route は配車確定後） -->
-<script src="js/data.js?v=20261029u"></script>
-<script src="js/ui.js?v=20261029u"></script>
-<script src="js/carpool.js?v=20261029u"></script>
-<script src="js/route.js?v=20261029u"></script>
-<script src="js/app.js?v=20261029u"></script>
+<script src="js/data.js?v=20261030a"></script>
+<script src="js/ui.js?v=20261030a"></script>
+<script src="js/carpool.js?v=20261030a"></script>
+<script src="js/route.js?v=20261030a"></script>
+<script src="js/app.js?v=20261030a"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

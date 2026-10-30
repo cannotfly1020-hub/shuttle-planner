@@ -155,7 +155,7 @@ function stopDisplayName(schedule, stop) {
   return textOrEmpty(stop.name);
 }
 
-/** 区分/クラス。未設定なら旧 grade */
+/** 介護度 / 区分。未設定なら旧 grade */
 function passengerGroupClass(passenger) {
   if (!passenger || typeof passenger !== 'object') return '';
   const next = textOrEmpty(passenger.groupClass);
@@ -329,7 +329,7 @@ function vehicleDriverLabel(vehicle) {
   if (role) return role.name;
   if (!raw || raw === '父' || raw === '母' || raw === '祖父' || raw === '祖母' || raw === 'コーチ' || raw === 'ドライバー') {
     const drivers = typeof getRoles === 'function' ? getRoles().filter((item) => item.isDriver) : [];
-    return drivers.length ? drivers[0].name : '運転手（職員）';
+    return drivers.length ? drivers[0].name : '送迎ドライバー';
   }
   return raw;
 }
@@ -920,7 +920,7 @@ function updateCarSelectOptions() {
   if (!addSelect) return;
 
   let currentAddVal = addSelect.value;
-  addSelect.innerHTML = '<option value="">専用車両: なし</option>';
+  addSelect.innerHTML = '<option value="">指定なし</option>';
   cars.forEach(c => {
     addSelect.innerHTML += `<option value="${c.name}">${c.name}</option>`;
   });
@@ -928,7 +928,7 @@ function updateCarSelectOptions() {
 
   if (editSelect) {
     let currentEditVal = editSelect.value;
-    editSelect.innerHTML = '<option value="">専用車両: なし</option>';
+    editSelect.innerHTML = '<option value="">指定なし</option>';
     cars.forEach(c => {
       editSelect.innerHTML += `<option value="${c.name}">${c.name}</option>`;
     });
@@ -992,7 +992,7 @@ function buildDriverSelectHtml(car) {
   const current = findStaffRole(textOrEmpty(car.driverRole) || textOrEmpty(car.driver));
   const options = roles.slice();
   if (current && !options.some((role) => role.id === current.id)) options.unshift(current);
-  if (!options.length) options.push({ id: 'role_driver', name: vehicleDriverLabel(car) || '運転手（職員）' });
+  if (!options.length) options.push({ id: 'role_driver', name: vehicleDriverLabel(car) || '送迎ドライバー' });
   const selectedId = current && options.some((role) => role.id === current.id) ? current.id : options[0].id;
   return `<label class="driver-select-label"><span>運転者:</span><select class="car-driver-select" data-action="set-car-driver" data-id="${car.id}" data-car-id="${car.id}" aria-label="本日の運転者">${buildRoleOptionsHtml(options, selectedId)}</select></label>`;
 }
