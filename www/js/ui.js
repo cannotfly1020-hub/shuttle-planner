@@ -2756,27 +2756,75 @@ function stripRouteSection(text) {
   return String(text || '').replace(/\n*【巡回時刻】[\s\S]*?(?=-----+\nよろしくお願いいたします。)/, '\n');
 }
 
-/** 座標があればそのピン、無ければ住所。どちらも無ければ空文字。APIキーは不要。 */
-function mapsDirectionUrl(point) {
-  if (!point) return '';
+/** 座標はカンマ区切りのまま、住所だけをエンコードする。どちらも無ければ空。 */
+function mapLocParam(point) {
+  if (!point) return { raw: '', encoded: '' };
   const lat = point.lat;
   const lng = point.lng;
   if (lat != null && lat !== '' && lng != null && lng !== '') {
     const latNum = Number(lat);
     const lngNum = Number(lng);
     if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
-      return `https://www.google.com/maps/dir/?api=1&destination=${latNum},${lngNum}`;
+      const raw = `${latNum},${lngNum}`;
+      return { raw: raw, encoded: raw };
     }
   }
   const address = String(point.address || '').trim();
-  if (!address) return '';
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+  if (!address) return { raw: '', encoded: '' };
+  return { raw: address, encoded: encodeURIComponent(address) };
 }
 
-function routeMapAnchor(point, label) {
-  const url = mapsDirectionUrl(point);
+function buildLegMapUrl(fromPoint, toPoint) {
+  const dest = mapLocParam(toPoint);
+  if (!dest.encoded) return '';
+  const origin = mapLocParam(fromPoint);
+  if (origin.encoded) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${origin.encoded}&destination=${dest.encoded}&travelmode=driving`;
+  }
+  return `https://www.google.com/maps/dir/?api=1&destination=${dest.encoded}&travelmode=driving`;
+}
+
+function buildFullVehicleRouteUrl(facility, passengers) {
+  const facilityLoc = mapLocParam(facility);
+  if (!facilityLoc.raw || !passengers || !passengers.length) return '';
+  const validWaypoints = passengers.map((passenger) => mapLocParam(passenger).raw).filter((loc) => loc);
+  if (!validWaypoints.length) return '';
+  const waypointsParam = encodeURIComponent(validWaypoints.join('|'));
+  return `https://www.google.com/maps/dir/?api=1&origin=${facilityLoc.encoded}&destination=${facilityLoc.encoded}&waypoints=${waypointsParam}&travelmode=driving`;
+}
+
+function routeMapAnchor(url, label) {
   if (!url) return '';
-  return `<a class="route-map map-link-btn" href="${escapeRoleText(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(label)}">📍 地図</a>`;
+  return `<a class="route-map map-link-btn" href="${escapeRoleText(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(label)}">📍 ナビ</a>`;
+}
+
+function timelinePoint(schedule, stop, facility) {
+  if (!stop) return null;
+  if (stop.type === 'depot_start' || stop.type === 'depot_end') return facility;
+  if (stop.type === 'passenger') return passengerMapPoint(schedule, stop);
+  return null;
+}
+
+function timelineLegUrls(schedule, facility) {
+  const timeline = schedule && Array.isArray(schedule.timeline) ? schedule.timeline : [];
+  let previous = null;
+  return timeline.map((stop) => {
+    const point = timelinePoint(schedule, stop, facility);
+    if (stop && stop.type === 'depot_start') {
+      previous = point || previous;
+      return '';
+    }
+    const url = buildLegMapUrl(previous, point);
+    if (point) previous = point;
+    return url;
+  });
+}
+
+function orderedPassengerPoints(schedule) {
+  const timeline = schedule && Array.isArray(schedule.timeline) ? schedule.timeline : [];
+  return timeline
+    .filter((stop) => stop && stop.type === 'passenger')
+    .map((stop) => passengerMapPoint(schedule, stop));
 }
 
 function passengerMapPoint(schedule, stop) {
@@ -2785,26 +2833,49 @@ function passengerMapPoint(schedule, stop) {
   return found || stop;
 }
 
+function appendUrlOnMarker(text, marker, url, cursor) {
+  if (!url) return { text: text, cursor: cursor };
+  const idx = text.indexOf(marker, cursor);
+  if (idx < 0) return { text: text, cursor: cursor };
+  const lineEnd = text.indexOf('\n', idx);
+  const end = lineEnd < 0 ? text.length : lineEnd;
+  if (text.slice(idx, end).indexOf(url) >= 0) return { text: text, cursor: end };
+  const next = `${text.slice(0, end)} ${url}${text.slice(end)}`;
+  return { text: next, cursor: end + url.length + 1 };
+}
+
 function routeTextWithMapLinks(schedules) {
   let text = formatRouteScheduleText(schedules);
   if (!text) return text;
+  const facility = typeof getFacility === 'function' ? getFacility() : null;
   let cursor = 0;
   (Array.isArray(schedules) ? schedules : []).forEach((schedule) => {
-    (schedule.timeline || []).forEach((stop) => {
-      if (!stop || stop.type !== 'passenger') return;
-      const url = mapsDirectionUrl(passengerMapPoint(schedule, stop));
-      if (!url) return;
-      const marker = `[${stop.arrivalTime}着 - ${stop.departureTime}発] ${stop.name}`;
-      const idx = text.indexOf(marker, cursor);
-      if (idx < 0) return;
-      const lineEnd = text.indexOf('\n', idx);
-      const end = lineEnd < 0 ? text.length : lineEnd;
-      if (text.slice(idx, end).indexOf(url) >= 0) {
-        cursor = end;
-        return;
+    const vehicleName = schedule.vehicle && schedule.vehicle.name ? schedule.vehicle.name : '車両';
+    const fullUrl = buildFullVehicleRouteUrl(facility, orderedPassengerPoints(schedule));
+    if (fullUrl) {
+      const heading = `■ ${vehicleName}\n`;
+      const headingAt = text.indexOf(heading, cursor);
+      if (headingAt >= 0) {
+        const insertAt = headingAt + heading.length;
+        const line = `【全行程ルート】: ${fullUrl}\n`;
+        if (text.slice(insertAt, insertAt + line.length) !== line) {
+          text = `${text.slice(0, insertAt)}${line}${text.slice(insertAt)}`;
+        }
+        cursor = insertAt + line.length;
       }
-      text = `${text.slice(0, end)} ${url}${text.slice(end)}`;
-      cursor = end + url.length + 1;
+    }
+    const legs = timelineLegUrls(schedule, facility);
+    (schedule.timeline || []).forEach((stop, index) => {
+      if (!stop) return;
+      const url = legs[index];
+      if (!url) return;
+      let marker = '';
+      if (stop.type === 'passenger') marker = `[${stop.arrivalTime}着 - ${stop.departureTime}発] ${stop.name}`;
+      else if (stop.type === 'depot_end') marker = `[${stop.arrivalTime}] 到着: ${stop.name}`;
+      if (!marker) return;
+      const appended = appendUrlOnMarker(text, marker, url, cursor);
+      text = appended.text;
+      cursor = appended.cursor;
     });
   });
   return text;
@@ -2971,24 +3042,32 @@ function renderRouteTimeline(schedules) {
     return;
   }
   root.innerHTML = list.map((schedule) => {
-    const vehicleName = escapeRoleText(schedule.vehicle && schedule.vehicle.name ? schedule.vehicle.name : '車両');
+    const rawVehicleName = schedule.vehicle && schedule.vehicle.name ? schedule.vehicle.name : '車両';
+    const vehicleName = escapeRoleText(rawVehicleName);
     const facility = typeof getFacility === 'function' ? getFacility() : null;
-    const stops = (schedule.timeline || []).map((stop) => {
+    const legs = timelineLegUrls(schedule, facility);
+    const fullUrl = buildFullVehicleRouteUrl(facility, orderedPassengerPoints(schedule));
+    const fullLink = fullUrl
+      ? `<a class="route-map route-full-nav map-link-btn" href="${escapeRoleText(fullUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeRoleText(rawVehicleName)}の全行程をGoogleマップで開く">🗺️ 本日の全行程ナビ</a>`
+      : '';
+    let previousLabel = facility && facility.name ? facility.name : '施設';
+    const stops = (schedule.timeline || []).map((stop, index) => {
       if (stop.type === 'depot_start') {
-        const mapLink = routeMapAnchor(facility, `${stop.name}への出発案内をGoogleマップで開く`);
+        previousLabel = stop.name || previousLabel;
         const depotAddress = facility && facility.address ? `<div class="route-address">${escapeRoleText(facility.address)}</div>` : '';
-        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span class="route-stop-body">出発: ${escapeRoleText(stop.name)}</span>${mapLink}</div>${depotAddress}`;
+        return `<div class="route-stop"><span class="route-time">${escapeRoleText(stop.departureTime)}</span><span class="route-stop-body">出発: ${escapeRoleText(stop.name)}</span></div>${depotAddress}`;
       }
       if (stop.type === 'passenger') {
         const tags = stop.careTags && stop.careTags.length ? ` [${escapeRoleText(stop.careTags.join('、'))}]` : '';
         const address = stop.address ? `<div class="route-address">${escapeRoleText(stop.address)}</div>` : '';
         const shownName = stopDisplayName(schedule, stop);
-        const mapLink = routeMapAnchor(passengerMapPoint(schedule, stop), `${shownName}の案内をGoogleマップで開く`);
+        const mapLink = routeMapAnchor(legs[index], `${previousLabel}から${shownName}への区間案内`);
+        previousLabel = shownName;
         return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
           <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}着 - ${escapeRoleText(stop.departureTime)}発</span><span class="route-stop-body">${escapeRoleText(shownName)}${tags} <em class="route-dwell">乗降${stop.dwellMinutes}分</em></span>${mapLink}</div>${address}`;
       }
       if (stop.type === 'depot_end') {
-        const mapLink = routeMapAnchor(facility, `${stop.name}への到着案内をGoogleマップで開く`);
+        const mapLink = routeMapAnchor(legs[index], `${previousLabel}から${stop.name}への区間案内`);
         const depotAddress = facility && facility.address ? `<div class="route-address">${escapeRoleText(facility.address)}</div>` : '';
         return `<div class="route-leg">↓ 車 ${stop.driveMinutes}分</div>
           <div class="route-stop"><span class="route-time">${escapeRoleText(stop.arrivalTime)}</span><span class="route-stop-body">到着: ${escapeRoleText(stop.name)}（総所要 ${schedule.totalMinutes}分）</span>${mapLink}</div>${depotAddress}`;
@@ -2996,7 +3075,7 @@ function renderRouteTimeline(schedules) {
       return '';
     }).join('');
     const note = schedule.approximated ? '<p class="route-note">座標がない区間は登録順のまま、目安5分で積算しています。</p>' : '';
-    return `<section class="route-card vehicle-plan-card"><h3 class="route-screen">${vehicleName}の巡回</h3><div class="vehicle-card-header">${vehiclePrintHeaderText(schedule)}</div><div class="route-screen">${stops}</div>${renderPrintTimelineTable(schedule)}${note}</section>`;
+    return `<section class="route-card vehicle-plan-card"><div class="route-card-head route-screen"><h3>${vehicleName}の巡回</h3>${fullLink}</div><div class="vehicle-card-header">${vehiclePrintHeaderText(schedule)}</div><div class="route-screen">${stops}</div>${renderPrintTimelineTable(schedule)}${note}</section>`;
   }).join('');
 }
 

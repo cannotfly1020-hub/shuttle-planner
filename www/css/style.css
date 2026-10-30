@@ -978,7 +978,17 @@ input[type="text"], input[type="number"], select { padding: 6px 7px; border: 1px
 .departure-row, .mode-select-box input[type="time"] { font-size: 16px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 8px; }
 .route-timeline { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .route-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; background: #f8fafc; }
-.route-card h3 { margin: 0 0 6px; font-size: 13px; color: #1e3a8a; }
+.route-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 6px;
+}
+.route-card h3,
+.route-card-head h3 { margin: 0; font-size: 13px; color: #1e3a8a; }
+.route-full-nav { margin-left: 0; white-space: nowrap; }
 .route-stop { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; line-height: 1.45; }
 .route-stop-body { flex: 1 1 140px; min-width: 0; }
 .route-time { font-weight: 800; color: #0f172a; min-width: 9.2em; flex: 0 0 auto; }
